@@ -1,7 +1,6 @@
 package com.mesh.hello.domain.matching.application;
 
-import com.mesh.hello.domain.calling.application.BedrockSummaryService;
-import com.mesh.hello.domain.calling.application.TranscriptBufferService;
+import com.mesh.hello.domain.calling.application.CallSessionService;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
@@ -24,8 +23,7 @@ public class MatchingService {
     private final MatchingRoomRepository matchingRoomRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final LiveKitService liveKitService;
-    private final TranscriptBufferService transcriptBufferService;
-    private final BedrockSummaryService bedrockSummaryService;
+    private final CallSessionService callSessionService;
 
     /**
      * 도움 요청자(helpee)가 매칭을 요청한다.
@@ -128,13 +126,7 @@ public class MatchingService {
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
         );
         matchingRoomRepository.deleteByRoomId(roomId);
-
-        try {
-            String transcript = transcriptBufferService.flushAndGet(roomId);
-            bedrockSummaryService.summarizeAndSave(roomId, transcript);
-        } catch (Exception e) {
-            log.error("통화 요약 요청 실패 roomId={}", roomId, e);
-        }
+        callSessionService.onCallEnded(roomId);
     }
 
     /**

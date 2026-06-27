@@ -1,6 +1,6 @@
 package com.mesh.hello.domain.matching.controller;
 
-import com.mesh.hello.domain.calling.application.TranscriptBufferService;
+import com.mesh.hello.domain.calling.application.TranscriptBufferStore;
 import com.mesh.hello.domain.matching.application.MatchingService;
 import com.mesh.hello.domain.matching.dto.SignalMessage;
 import com.mesh.hello.domain.matching.dto.SttMessage;
@@ -21,42 +21,35 @@ import java.security.Principal;
 public class SignalingController {
     private final MatchingService matchingService;
     private final SimpMessagingTemplate messagingTemplate;
-    private final TranscriptBufferService transcriptBufferService;
+    private final TranscriptBufferStore transcriptBufferStore;
     private final MatchingRoomRepository matchingRoomRepository;
 
-    // 도우미 대기열 등록 → 대기 중인 helpee 있으면 즉시 매칭
     @MessageMapping("/help/register")
     public void helperRegister(Principal principal) {
         matchingService.registerHelper(principal.getName());
     }
 
-    // 어르신 도움 요청 → 매칭 시도
     @MessageMapping("/help/request")
     public void helpRequest(Principal principal) {
         matchingService.requestMatch(principal.getName());
     }
 
-    // 통화 종료
     @MessageMapping("/call/end")
     public void callEnd(Principal principal, SignalMessage msg) {
         matchingService.endCall(principal.getName(), msg.getRoomId());
     }
 
-    // STT 텍스트 누적
+    // 오디오 WebSocket(/ws/audio) 연결이 불가한 환경의 폴백 — 프론트엔드 STT 결과를 직접 수신
     @MessageMapping("/stt/append")
     public void appendStt(Principal principal, SttMessage msg) {
-        log.info("[STT 수신] roomId={} sessionId={} text={}", msg.getRoomId(), principal.getName(), msg.getText());
-        matchingRoomRepository.findByRoomId(msg.getRoomId()).ifPresent(room -> {
-            String speaker = room.getHelpeeSessionId().equals(principal.getName()) ? "어르신" : "도우미";
-            transcriptBufferService.append(msg.getRoomId(), speaker, msg.getText());
-            log.info("[STT 누적] roomId={} speaker={} text={}", msg.getRoomId(), speaker, msg.getText());
-        });
-        if (matchingRoomRepository.findByRoomId(msg.getRoomId()).isEmpty()) {
-            log.warn("[STT 누락] roomId={}에 해당하는 방 없음 — 매칭 전이거나 이미 종료됨", msg.getRoomId());
-        }
+        String roomId = msg.getRoomId();
+        log.info("[STT 폴백] roomId={} sessionId={} text={}", roomId, principal.getName(), msg.getText());
+        matchingRoomRepository.findByRoomId(roomId).ifPresentOrElse(
+                room -> transcriptBufferStore.append(roomId, msg.getText()),
+                () -> log.warn("[STT 폴백] roomId={}에 해당하는 방 없음", roomId)
+        );
     }
 
-    // WebRTC 시그널링 중계 (SDP/ICE)
     @MessageMapping("/signal/{roomId}")
     public void signal(@DestinationVariable String roomId, SignalMessage msg) {
         messagingTemplate.convertAndSend("/topic/room/" + roomId, ApiResponse.ok("시그널을 중계합니다.", msg));

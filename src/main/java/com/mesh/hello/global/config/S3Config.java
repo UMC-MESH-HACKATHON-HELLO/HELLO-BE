@@ -8,7 +8,9 @@ import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.s3.S3Client;
 
-@Configuration
+// AwsConfig로 통합됨 — 중복 Bean 방지를 위해 비활성화
+// // AwsConfig로 통합됨 — 중복 Bean 방지를 위해 비활성화
+// @Configuration
 public class S3Config {
 
     @Value("${aws.s3.region}")
