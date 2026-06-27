@@ -98,7 +98,8 @@ public class SecurityConfig {
                 "http://localhost:3000",
                 "http://localhost:5173",
                 "https://hello.sublumen.xyz",
-                "https://hello-fe-bay.vercel.app"
+                "https://hello-fe-bay.vercel.app",
+                "https://hello-fe-git-main-jungbin.vercel.app"
         ));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
