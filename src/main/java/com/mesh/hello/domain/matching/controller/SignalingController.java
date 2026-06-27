@@ -2,6 +2,7 @@ package com.mesh.hello.domain.matching.controller;
 
 import com.mesh.hello.domain.matching.application.MatchingService;
 import com.mesh.hello.domain.matching.dto.SignalMessage;
+import com.mesh.hello.global.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -37,6 +38,6 @@ public class SignalingController {
     // WebRTC 시그널링 중계 (SDP/ICE)
     @MessageMapping("/signal/{roomId}")
     public void signal(@DestinationVariable String roomId, SignalMessage msg) {
-        messagingTemplate.convertAndSend("/topic/room/" + roomId, msg);
+        messagingTemplate.convertAndSend("/topic/room/" + roomId, ApiResponse.ok("시그널을 중계합니다.", msg));
     }
 }

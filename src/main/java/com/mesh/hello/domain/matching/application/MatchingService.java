@@ -3,6 +3,7 @@ package com.mesh.hello.domain.matching.application;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
+import com.mesh.hello.global.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -32,7 +33,7 @@ public class MatchingService {
             matchingQueueRepository.pushHelpee(helpeeSessionId);
             messagingTemplate.convertAndSendToUser(
                     helpeeSessionId, "/queue/signal",
-                    Map.of("type", "NO_HELPER")
+                    ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
             );
             return;
         }
@@ -49,11 +50,13 @@ public class MatchingService {
 
             messagingTemplate.convertAndSendToUser(
                     helpeeSessionId, "/queue/signal",
-                    Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken)
+                    ApiResponse.ok("매칭에 성공했습니다.",
+                            Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken))
             );
             messagingTemplate.convertAndSendToUser(
                     helperSessionId, "/queue/signal",
-                    Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken)
+                    ApiResponse.ok("매칭에 성공했습니다.",
+                            Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken))
             );
 
         } catch (Exception e) {
@@ -61,7 +64,7 @@ public class MatchingService {
             matchingQueueRepository.pushHelper(helperSessionId);
             messagingTemplate.convertAndSendToUser(
                     helpeeSessionId, "/queue/signal",
-                    Map.of("type", "NO_HELPER")
+                    ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
             );
         }
     }
@@ -77,7 +80,7 @@ public class MatchingService {
             matchingQueueRepository.pushHelper(helperSessionId);
             messagingTemplate.convertAndSendToUser(
                     helperSessionId, "/queue/signal",
-                    Map.of("type", "WAITING")
+                    ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
             );
             return;
         }
@@ -94,11 +97,13 @@ public class MatchingService {
 
             messagingTemplate.convertAndSendToUser(
                     helpeeSessionId, "/queue/signal",
-                    Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken)
+                    ApiResponse.ok("매칭에 성공했습니다.",
+                            Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken))
             );
             messagingTemplate.convertAndSendToUser(
                     helperSessionId, "/queue/signal",
-                    Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken)
+                    ApiResponse.ok("매칭에 성공했습니다.",
+                            Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken))
             );
 
         } catch (Exception e) {
@@ -113,7 +118,7 @@ public class MatchingService {
     public void endCall(String sessionId, String roomId) {
         messagingTemplate.convertAndSend(
                 "/topic/room/" + roomId,
-                (Object) Map.of("type", "ENDED")
+                (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
         );
         matchingRoomRepository.deleteByRoomId(roomId);
     }
@@ -130,7 +135,7 @@ public class MatchingService {
             room.counterpartOf(sessionId).ifPresent(counterpart ->
                     messagingTemplate.convertAndSendToUser(
                             counterpart, "/queue/signal",
-                            Map.of("type", "PARTNER_DISCONNECTED")
+                            ApiResponse.ok("상대방의 연결이 종료되었습니다.", Map.of("type", "PARTNER_DISCONNECTED"))
                     )
             );
             matchingRoomRepository.deleteByRoomId(room.getRoomId());
