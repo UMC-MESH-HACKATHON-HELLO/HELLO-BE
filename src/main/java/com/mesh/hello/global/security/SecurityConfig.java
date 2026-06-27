@@ -1,0 +1,77 @@
+package com.mesh.hello.global.security;
+
+import lombok.RequiredArgsConstructor;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
+
+/**
+ * 세션 기반 인증 설정(JWT 아님).
+ *
+ * <ul>
+ *   <li>무인증이 서비스 핵심 가치 → 어르신/익명 플로우는 막지 않는다. 도우미 전용 경로만 보호한다.</li>
+ *   <li>세션 정책 IF_REQUIRED. 로그인 시 SecurityContext를 세션에 저장 → JSESSIONID로 인증 유지.</li>
+ *   <li>도우미 전용: {@code /helper/**} authenticated. 그 외는 permitAll(어르신/익명 보호).</li>
+ * </ul>
+ */
+@Configuration
+@EnableWebSecurity
+@RequiredArgsConstructor
+public class SecurityConfig {
+
+    private final RestAuthenticationEntryPoint restAuthenticationEntryPoint;
+
+    @Bean
+    public SecurityFilterChain filterChain(HttpSecurity http,
+                                           SecurityContextRepository securityContextRepository) throws Exception {
+        http
+                // MVP: JSON API라 CSRF 비활성화. 세션 쿠키 기반이므로 실서비스 전 반드시 재검토(CSRF 토큰 도입 등).
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+                .securityContext(sc -> sc.securityContextRepository(securityContextRepository))
+                .authorizeHttpRequests(auth -> auth
+                        // 로그인/가입/로그아웃
+                        .requestMatchers("/login", "/signup", "/logout").permitAll()
+                        // 익명 WebSocket 핸드셰이크/SockJS (어르신·익명 매칭 플로우)
+                        .requestMatchers("/ws/**").permitAll()
+                        // 정적/데모 리소스, H2 콘솔(local)
+                        .requestMatchers("/", "/error", "/favicon.ico",
+                                "/stomp-test.html", "/livekit-client.umd.min.js", "/h2-console/**").permitAll()
+                        // 도우미 전용 (대기 시작/종료·포인트 조회 등은 여기에 추가)
+                        .requestMatchers("/helper/**").authenticated()
+                        // 그 외는 무인증 허용 — 어르신/익명 플로우가 막히면 안 됨
+                        .anyRequest().permitAll()
+                )
+                .exceptionHandling(eh -> eh.authenticationEntryPoint(restAuthenticationEntryPoint))
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable())
+                .logout(logout -> logout.disable())          // 커스텀 /logout 사용
+                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin())); // H2 콘솔용
+
+        return http.build();
+    }
+
+    @Bean
+    public SecurityContextRepository securityContextRepository() {
+        return new HttpSessionSecurityContextRepository();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
+        return configuration.getAuthenticationManager();
+    }
+}
