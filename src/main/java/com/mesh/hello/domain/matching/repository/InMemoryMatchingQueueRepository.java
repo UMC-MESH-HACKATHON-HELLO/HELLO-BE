@@ -35,7 +35,7 @@ public class InMemoryMatchingQueueRepository implements MatchingQueueRepository 
 
     @Override
     public void pushHelpee(String helpeeSessionId) {
-        if (helpeeQueue.contains(helpeeSessionId)) {
+        if (!helpeeQueue.contains(helpeeSessionId)) {
             helpeeQueue.add(helpeeSessionId);
         }
     }
