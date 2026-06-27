@@ -5,31 +5,43 @@
   <title>STOMP 테스트</title>
   <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+  <script src="/livekit-client.umd.min.js"></script>
   <style>
-    body { font-family: monospace; max-width: 800px; margin: 20px auto; padding: 0 16px; }
+    body { font-family: monospace; max-width: 860px; margin: 20px auto; padding: 0 16px; }
     .row { display: flex; gap: 16px; }
     .box { flex: 1; border: 1px solid #ccc; padding: 12px; border-radius: 6px; }
     h3 { margin-top: 0; }
     input { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px; }
     button { width: 100%; padding: 8px; margin-bottom: 6px; cursor: pointer; }
-    .log { background: #111; color: #0f0; padding: 8px; height: 260px; overflow-y: auto;
+    .log { background: #111; color: #0f0; padding: 8px; height: 220px; overflow-y: auto;
            font-size: 12px; white-space: pre-wrap; border-radius: 4px; }
+    .lk-status { margin: 6px 0; font-size: 13px; }
     .connected { color: #0f0; } .disconnected { color: #f44; }
+    .global { border: 1px solid #aaa; padding: 10px; border-radius: 6px; margin-bottom: 12px; }
+    .global label { font-size: 13px; }
   </style>
 </head>
 <body>
-<h2>STOMP WebSocket 테스트</h2>
+<h2>STOMP + LiveKit 음성 테스트</h2>
+
+<div class="global">
+  <label>LiveKit 서버 URL</label>
+  <input id="livekitUrl" value="ws://localhost:7880" placeholder="ws://localhost:7880">
+</div>
+
 <div class="row">
 
   <!-- 도우미 -->
   <div class="box">
     <h3>도우미 (Helper)</h3>
     <input id="helperSessionId" value="helper-001" placeholder="sessionId">
-    <button onclick="connect('helper')">연결</button>
-    <button onclick="disconnect('helper')">연결 종료</button>
-    <button onclick="registerHelper()">대기 등록 (/help/register)</button>
-    <button onclick="endCall('helper')">통화 종료 (/call/end)</button>
-    <div id="helperStatus" class="disconnected">● 미연결</div>
+    <button onclick="connect('helper')">1. STOMP 연결</button>
+    <button onclick="registerHelper()">2. 대기 등록</button>
+    <button onclick="toggleMic('helper')">마이크 ON/OFF</button>
+    <button onclick="endCall('helper')">통화 종료</button>
+    <button onclick="disconnect('helper')">STOMP 연결 종료</button>
+    <div id="helperStatus" class="disconnected">● STOMP 미연결</div>
+    <div id="helperLkStatus" class="lk-status">● LiveKit 미연결</div>
     <div class="log" id="helperLog"></div>
   </div>
 
@@ -37,23 +49,26 @@
   <div class="box">
     <h3>어르신 (Helpee)</h3>
     <input id="helpeeSessionId" value="helpee-001" placeholder="sessionId">
-    <button onclick="connect('helpee')">연결</button>
-    <button onclick="disconnect('helpee')">연결 종료</button>
-    <button onclick="requestMatch()">도움 요청 (/help/request)</button>
-    <button onclick="endCall('helpee')">통화 종료 (/call/end)</button>
-    <div id="helpeeStatus" class="disconnected">● 미연결</div>
+    <button onclick="connect('helpee')">1. STOMP 연결</button>
+    <button onclick="requestMatch()">2. 도움 요청</button>
+    <button onclick="toggleMic('helpee')">마이크 ON/OFF</button>
+    <button onclick="endCall('helpee')">통화 종료</button>
+    <button onclick="disconnect('helpee')">STOMP 연결 종료</button>
+    <div id="helpeeStatus" class="disconnected">● STOMP 미연결</div>
+    <div id="helpeeLkStatus" class="lk-status">● LiveKit 미연결</div>
     <div class="log" id="helpeeLog"></div>
   </div>
 
 </div>
 
 <script>
-  const clients = {};
-  const rooms = {};
+  const stompClients = {};
+  const lkRooms = {};
+  const roomIds = {};
 
   function log(role, msg) {
     const el = document.getElementById(role + 'Log');
-    el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n${'─'.repeat(40)}\n`;
+    el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n${'─'.repeat(38)}\n`;
     el.scrollTop = el.scrollHeight;
   }
 
@@ -63,10 +78,15 @@
     el.className = cls;
   }
 
+  function setLkStatus(role, text) {
+    document.getElementById(role + 'LkStatus').textContent = '● ' + text;
+  }
+
+  // ── STOMP ──────────────────────────────────────────────
   function connect(role) {
     const sessionId = document.getElementById(role + 'SessionId').value.trim();
     if (!sessionId) { alert('sessionId를 입력하세요'); return; }
-    if (clients[role]) { log(role, '이미 연결됨'); return; }
+    if (stompClients[role]) { log(role, '이미 STOMP 연결됨'); return; }
 
     const client = new StompJs.Client({
       webSocketFactory: () => new SockJS(`http://localhost:8080/ws?sessionId=${sessionId}`),
@@ -74,26 +94,34 @@
       reconnectDelay: 0,
       onConnect: () => {
         setStatus(role, '연결됨 (' + sessionId + ')', 'connected');
-        log(role, 'CONNECTED');
+        log(role, 'STOMP CONNECTED');
 
-        client.subscribe('/user/queue/signal', (msg) => {
+        client.subscribe('/user/queue/signal', async (msg) => {
           const body = JSON.parse(msg.body);
           log(role, '수신:\n' + JSON.stringify(body, null, 2));
+
           if (body.type === 'MATCHED') {
-            rooms[role] = body.roomId;
-            log(role, '→ roomId 저장: ' + body.roomId);
+            roomIds[role] = body.roomId;
             client.subscribe('/topic/room/' + body.roomId, (roomMsg) => {
               const roomBody = JSON.parse(roomMsg.body);
               log(role, '[방] 수신:\n' + JSON.stringify(roomBody, null, 2));
+              if (roomBody.type === 'ENDED') {
+                leaveLiveKit(role);
+              }
             });
             log(role, '→ /topic/room/' + body.roomId + ' 구독 완료');
+            await joinLiveKit(role, body.token, body.roomId);
+          }
+
+          if (body.type === 'PARTNER_DISCONNECTED') {
+            leaveLiveKit(role);
           }
         });
       },
       onDisconnect: () => {
         setStatus(role, '미연결', 'disconnected');
-        log(role, 'DISCONNECTED');
-        delete clients[role];
+        log(role, 'STOMP DISCONNECTED');
+        delete stompClients[role];
       },
       onStompError: (frame) => {
         log(role, 'STOMP ERROR: ' + frame.headers['message']);
@@ -101,43 +129,97 @@
     });
 
     client.activate();
-    clients[role] = client;
+    stompClients[role] = client;
   }
 
   function disconnect(role) {
-    if (clients[role]) { clients[role].deactivate(); delete clients[role]; }
+    leaveLiveKit(role);
+    if (stompClients[role]) { stompClients[role].deactivate(); delete stompClients[role]; }
   }
 
   function registerHelper() {
-    const sessionId = document.getElementById('helperSessionId').value.trim();
-    if (!clients['helper']) { alert('먼저 연결하세요'); return; }
-    clients['helper'].publish({
-      destination: '/app/help/register',
-      body: JSON.stringify({ sessionId })
-    });
+    if (!stompClients['helper']) { alert('먼저 STOMP 연결하세요'); return; }
+    stompClients['helper'].publish({ destination: '/app/help/register', body: '{}' });
     log('helper', '전송 → /app/help/register');
   }
 
   function requestMatch() {
-    const sessionId = document.getElementById('helpeeSessionId').value.trim();
-    if (!clients['helpee']) { alert('먼저 연결하세요'); return; }
-    clients['helpee'].publish({
-      destination: '/app/help/request',
-      body: JSON.stringify({ sessionId })
-    });
+    if (!stompClients['helpee']) { alert('먼저 STOMP 연결하세요'); return; }
+    stompClients['helpee'].publish({ destination: '/app/help/request', body: '{}' });
     log('helpee', '전송 → /app/help/request');
   }
 
   function endCall(role) {
-    const sessionId = document.getElementById(role + 'SessionId').value.trim();
-    const roomId = rooms[role];
+    const roomId = roomIds[role];
     if (!roomId) { alert('MATCHED 후 roomId가 없습니다'); return; }
-    if (!clients[role]) { alert('먼저 연결하세요'); return; }
-    clients[role].publish({
+    if (!stompClients[role]) { alert('먼저 STOMP 연결하세요'); return; }
+    stompClients[role].publish({
       destination: '/app/call/end',
-      body: JSON.stringify({ sessionId, roomId })
+      body: JSON.stringify({ roomId })
     });
-    log(role, '전송 → /app/call/end (roomId: ' + roomId + ')');
+    log(role, '전송 → /app/call/end');
+  }
+
+  // ── LiveKit ────────────────────────────────────────────
+  async function joinLiveKit(role, token, roomId) {
+    const livekitUrl = document.getElementById('livekitUrl').value.trim();
+    log(role, 'LiveKit 입장 시도: ' + roomId);
+
+    if (typeof LivekitClient === 'undefined') {
+      log(role, '[LiveKit] SDK 로드 실패 — 브라우저 콘솔(F12) 확인');
+      return;
+    }
+
+    try {
+      const room = new LivekitClient.Room();
+      lkRooms[role] = room;
+
+      room.on(LivekitClient.RoomEvent.ParticipantConnected, (p) => {
+        log(role, '[LiveKit] 상대방 입장: ' + p.identity);
+      });
+      room.on(LivekitClient.RoomEvent.ParticipantDisconnected, (p) => {
+        log(role, '[LiveKit] 상대방 퇴장: ' + p.identity);
+      });
+      room.on(LivekitClient.RoomEvent.Disconnected, () => {
+        setLkStatus(role, 'LiveKit 미연결');
+        log(role, '[LiveKit] 연결 종료');
+        delete lkRooms[role];
+      });
+      room.on(LivekitClient.RoomEvent.TrackSubscribed, (track, pub, participant) => {
+        if (track.kind === LivekitClient.Track.Kind.Audio) {
+          const audioEl = track.attach();
+          document.body.appendChild(audioEl);
+          log(role, '[LiveKit] 상대방 오디오 수신: ' + participant.identity);
+        }
+      });
+
+      await room.connect(livekitUrl, token);
+      setLkStatus(role, 'LiveKit 연결됨 ✓');
+      log(role, '[LiveKit] 연결 성공 (roomId: ' + roomId + ')');
+
+      await room.localParticipant.setMicrophoneEnabled(true);
+      log(role, '[LiveKit] 마이크 활성화');
+    } catch (e) {
+      log(role, '[LiveKit] 연결 실패: ' + e.message);
+      setLkStatus(role, 'LiveKit 연결 실패');
+      delete lkRooms[role];
+    }
+  }
+
+  async function leaveLiveKit(role) {
+    if (lkRooms[role]) {
+      await lkRooms[role].disconnect();
+      delete lkRooms[role];
+    }
+    delete roomIds[role];
+  }
+
+  async function toggleMic(role) {
+    const room = lkRooms[role];
+    if (!room) { log(role, '[LiveKit] 먼저 매칭 후 입장하세요'); return; }
+    const enabled = room.localParticipant.isMicrophoneEnabled;
+    await room.localParticipant.setMicrophoneEnabled(!enabled);
+    log(role, '[LiveKit] 마이크 ' + (!enabled ? 'ON' : 'OFF'));
   }
 </script>
 </body>
