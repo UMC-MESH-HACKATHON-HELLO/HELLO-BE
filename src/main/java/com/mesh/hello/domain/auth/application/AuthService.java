@@ -3,6 +3,7 @@ package com.mesh.hello.domain.auth.application;
 import com.mesh.hello.domain.auth.dto.LoginRequest;
 import com.mesh.hello.domain.auth.dto.LoginResponse;
 import com.mesh.hello.domain.auth.dto.SignupRequest;
+import com.mesh.hello.domain.auth.dto.SignupResponse;
 import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
 import com.mesh.hello.domain.user.domain.User;
 import com.mesh.hello.domain.user.repository.UserRepository;
@@ -83,9 +84,12 @@ public class AuthService {
         }
     }
 
-    /** 최소 회원가입(범위 밖이지만 시연용). username 중복 체크 + BCrypt 저장. */
+    /**
+     * 도우미 회원가입. username 중복 체크 후 비밀번호를 로그인과 동일한 {@link PasswordEncoder}(BCrypt)로
+     * 해싱해 저장한다. 가입 직후 자동 로그인은 하지 않는다(가입과 로그인은 분리).
+     */
     @Transactional
-    public Long signup(SignupRequest request) {
+    public SignupResponse signup(SignupRequest request) {
         if (userRepository.existsByUsername(request.username())) {
             throw new BusinessException(ErrorCode.DUPLICATE_USERNAME);
         }
@@ -94,7 +98,8 @@ public class AuthService {
                 .password(passwordEncoder.encode(request.password()))
                 .nickname(request.nickname())
                 .build();
-        return userRepository.save(user).getId();
+        User saved = userRepository.save(user);
+        return new SignupResponse(saved.getId(), saved.getUsername(), saved.getNickname());
     }
 
     /**

@@ -4,15 +4,19 @@ import com.mesh.hello.domain.auth.application.AuthService;
 import com.mesh.hello.domain.auth.dto.LoginRequest;
 import com.mesh.hello.domain.auth.dto.LoginResponse;
 import com.mesh.hello.domain.auth.dto.SignupRequest;
+import com.mesh.hello.domain.auth.dto.SignupResponse;
 import com.mesh.hello.global.common.response.ApiResponse;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @Tag(name = "Auth", description = "인증 API")
@@ -42,13 +46,15 @@ public class AuthController {
         return ApiResponse.ok("로그아웃되었습니다.", null);
     }
 
-    @Operation(summary = "회원가입", description = "username/password/nickname으로 계정을 생성합니다.")
+    @Operation(summary = "회원가입", description = "username/password/nickname으로 도우미 계정을 생성합니다. 가입 직후 자동 로그인은 하지 않습니다.")
     @ApiResponses({
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "회원가입 성공"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "중복 username")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "201", description = "회원가입 성공"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "입력값 검증 실패"),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "이미 사용 중인 username")
     })
     @PostMapping("/signup")
-    public ApiResponse<Long> signup(@RequestBody SignupRequest request) {
-        return ApiResponse.ok("회원가입이 완료되었습니다.", authService.signup(request));
+    @ResponseStatus(HttpStatus.CREATED)
+    public ApiResponse<SignupResponse> signup(@Valid @RequestBody SignupRequest request) {
+        return ApiResponse.of(201, "회원가입이 완료되었습니다.", authService.signup(request));
     }
 }

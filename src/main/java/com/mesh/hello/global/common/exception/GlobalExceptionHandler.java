@@ -4,6 +4,7 @@ import com.mesh.hello.global.common.response.ApiResponse;
 import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -26,6 +27,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(errorCode.getCode())
                 .body(ApiResponse.error(errorCode.getCode(), e.getMessage()));
+    }
+
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ApiResponse<Void>> handleValidation(MethodArgumentNotValidException e) {
+        String message = e.getBindingResult().getFieldErrors().stream()
+                .findFirst()
+                .map(err -> err.getDefaultMessage())
+                .orElse("입력값이 올바르지 않습니다.");
+        log.debug("검증 실패: {}", message);
+        return ResponseEntity
+                .status(400)
+                .body(ApiResponse.error(400, message));
     }
 
     @ExceptionHandler(Exception.class)
