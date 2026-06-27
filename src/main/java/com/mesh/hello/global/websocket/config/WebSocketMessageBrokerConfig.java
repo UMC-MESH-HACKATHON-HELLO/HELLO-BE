@@ -50,6 +50,7 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
     public void registerStompEndpoints(StompEndpointRegistry registry) {
         registry.addEndpoint("/ws")
             .addInterceptors(shutdownAwareHandshakeInterceptor, sessionIdHandshakeInterceptor)
+            .setAllowedOriginPatterns("*")
             .withSockJS();
     }
 
