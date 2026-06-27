@@ -89,7 +89,7 @@
     if (stompClients[role]) { log(role, '이미 STOMP 연결됨'); return; }
 
     const client = new StompJs.Client({
-      webSocketFactory: () => new SockJS(`http://localhost:8080/ws?sessionId=${sessionId}`),
+      webSocketFactory: () => new SockJS(`${location.origin}/ws?sessionId=${sessionId}`),
       connectHeaders: { sessionId },
       reconnectDelay: 0,
       onConnect: () => {
