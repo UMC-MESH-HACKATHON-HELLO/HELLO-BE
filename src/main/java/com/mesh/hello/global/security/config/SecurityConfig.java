@@ -46,6 +46,9 @@ public class SecurityConfig {
                         .requestMatchers("/api/session").permitAll()
                         // 익명 WebSocket 핸드셰이크/SockJS (어르신·익명 매칭 플로우)
                         .requestMatchers("/ws/**").permitAll()
+                        // Swagger UI
+                        .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
+                                "/v3/api-docs/**", "/api-docs/**").permitAll()
                         // 정적/데모 리소스
                         .requestMatchers("/", "/error", "/favicon.ico",
                                 "/stomp-test.html", "/livekit-client.umd.min.js", "/h2-console/**").permitAll()
