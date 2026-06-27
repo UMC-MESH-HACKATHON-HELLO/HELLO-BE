@@ -49,4 +49,5 @@ public class User {
         this.nickname = nickname;
         this.points = 0L;
     }
+
 }
