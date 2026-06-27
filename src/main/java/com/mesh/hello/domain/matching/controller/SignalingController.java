@@ -2,6 +2,7 @@ package com.mesh.hello.domain.matching.controller;
 
 import com.mesh.hello.domain.matching.application.MatchingService;
 import com.mesh.hello.domain.matching.dto.SignalMessage;
+import com.mesh.hello.global.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
@@ -17,6 +18,7 @@ public class SignalingController {
     // 도우미 대기열 등록 → 대기 중인 helpee 있으면 즉시 매칭
     @MessageMapping("/help/register")
     public void helperRegister(SignalMessage msg) {
+
         matchingService.registerHelper(msg.getSessionId());
     }
 
@@ -35,6 +37,6 @@ public class SignalingController {
     // WebRTC 시그널링 중계 (SDP/ICE)
     @MessageMapping("/signal/{roomId}")
     public void signal(@DestinationVariable String roomId, SignalMessage msg) {
-        messagingTemplate.convertAndSend("/topic/room/" + roomId, msg);
+        messagingTemplate.convertAndSend("/topic/room/" + roomId, ApiResponse.ok("시그널을 중계합니다.", msg));
     }
 }
