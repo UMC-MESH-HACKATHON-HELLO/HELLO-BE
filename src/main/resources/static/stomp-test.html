@@ -109,33 +109,24 @@
   }
 
   function registerHelper() {
-    const sessionId = document.getElementById('helperSessionId').value.trim();
     if (!clients['helper']) { alert('먼저 연결하세요'); return; }
-    clients['helper'].publish({
-      destination: '/app/help/register',
-      body: JSON.stringify({ sessionId })
-    });
+    clients['helper'].publish({ destination: '/app/help/register', body: '{}' });
     log('helper', '전송 → /app/help/register');
   }
 
   function requestMatch() {
-    const sessionId = document.getElementById('helpeeSessionId').value.trim();
     if (!clients['helpee']) { alert('먼저 연결하세요'); return; }
-    clients['helpee'].publish({
-      destination: '/app/help/request',
-      body: JSON.stringify({ sessionId })
-    });
+    clients['helpee'].publish({ destination: '/app/help/request', body: '{}' });
     log('helpee', '전송 → /app/help/request');
   }
 
   function endCall(role) {
-    const sessionId = document.getElementById(role + 'SessionId').value.trim();
     const roomId = rooms[role];
     if (!roomId) { alert('MATCHED 후 roomId가 없습니다'); return; }
     if (!clients[role]) { alert('먼저 연결하세요'); return; }
     clients[role].publish({
       destination: '/app/call/end',
-      body: JSON.stringify({ sessionId, roomId })
+      body: JSON.stringify({ roomId })
     });
     log(role, '전송 → /app/call/end (roomId: ' + roomId + ')');
   }
