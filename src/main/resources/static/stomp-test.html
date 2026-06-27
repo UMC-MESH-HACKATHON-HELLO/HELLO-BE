@@ -7,26 +7,38 @@
   <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
   <script src="/livekit-client.umd.min.js"></script>
   <style>
-    body { font-family: monospace; max-width: 860px; margin: 20px auto; padding: 0 16px; }
+    body { font-family: monospace; max-width: 940px; margin: 20px auto; padding: 0 16px; }
     .row { display: flex; gap: 16px; }
     .box { flex: 1; border: 1px solid #ccc; padding: 12px; border-radius: 6px; }
     h3 { margin-top: 0; }
-    input { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px; }
+    input, textarea { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px; font-family: monospace; }
+    textarea { resize: vertical; }
     button { width: 100%; padding: 8px; margin-bottom: 6px; cursor: pointer; }
+    button.secondary { background: #eee; }
+    button.danger { background: #fdd; }
     .log { background: #111; color: #0f0; padding: 8px; height: 220px; overflow-y: auto;
            font-size: 12px; white-space: pre-wrap; border-radius: 4px; }
     .lk-status { margin: 6px 0; font-size: 13px; }
     .connected { color: #0f0; } .disconnected { color: #f44; }
     .global { border: 1px solid #aaa; padding: 10px; border-radius: 6px; margin-bottom: 12px; }
     .global label { font-size: 13px; }
+    .stt-section { border-top: 1px dashed #ccc; margin-top: 10px; padding-top: 10px; }
+    .stt-section h4 { margin: 0 0 6px 0; font-size: 13px; color: #555; }
+    .stt-auto { display: flex; gap: 6px; margin-bottom: 6px; }
+    .stt-auto button { margin: 0; }
+    .summary-box { background: #f5f5ff; border: 1px solid #99a; padding: 8px;
+                   border-radius: 4px; min-height: 60px; font-size: 12px; white-space: pre-wrap; }
+    .label-tag { display: inline-block; background: #ddf; border-radius: 3px;
+                 padding: 1px 6px; font-size: 11px; margin-bottom: 4px; }
+    hr { border: none; border-top: 1px solid #eee; margin: 10px 0; }
   </style>
 </head>
 <body>
-<h2>STOMP + LiveKit 음성 테스트</h2>
+<h2>STOMP + LiveKit + STT 테스트</h2>
 
 <div class="global">
   <label>LiveKit 서버 URL</label>
-  <input id="livekitUrl" value="ws://localhost:7880" placeholder="ws://localhost:7880">
+  <input id="livekitUrl" value="wss://hello-f3stxgas.livekit.cloud" placeholder="wss://...">
 </div>
 
 <div class="row">
@@ -37,11 +49,30 @@
     <input id="helperSessionId" value="helper-001" placeholder="sessionId">
     <button onclick="connect('helper')">1. STOMP 연결</button>
     <button onclick="registerHelper()">2. 대기 등록</button>
-    <button onclick="toggleMic('helper')">마이크 ON/OFF</button>
-    <button onclick="endCall('helper')">통화 종료</button>
-    <button onclick="disconnect('helper')">STOMP 연결 종료</button>
+    <button onclick="toggleMic('helper')" class="secondary">마이크 ON/OFF</button>
+    <button onclick="endCall('helper')" class="danger">통화 종료 (요약 트리거)</button>
+    <button onclick="disconnect('helper')" class="secondary">STOMP 연결 종료</button>
     <div id="helperStatus" class="disconnected">● STOMP 미연결</div>
     <div id="helperLkStatus" class="lk-status">● LiveKit 미연결</div>
+
+    <div class="stt-section">
+      <h4>STT 텍스트 전송</h4>
+      <button onclick="toggleRealStt('helper')" id="helperRealSttBtn" style="background:#cfc;">🎤 실시간 STT 시작</button>
+      <div id="helperSttStatus" style="font-size:11px;color:#888;margin-bottom:4px;"></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <span style="font-size:10px;color:#aaa;">마이크</span>
+        <div style="flex:1;height:6px;background:#eee;border-radius:3px;overflow:hidden;">
+          <div id="helperMicBar" style="height:100%;width:0%;background:#4a90d9;transition:width 0.05s;"></div>
+        </div>
+      </div>
+      <textarea id="helperSttText" rows="2" placeholder="도우미가 말할 내용 입력">안녕하세요, 오늘 어떻게 도와드릴까요?</textarea>
+      <button onclick="sendStt('helper')">수동 전송 → /app/stt/append</button>
+      <div class="stt-auto">
+        <button onclick="startAutoStt('helper')" class="secondary">자동 시뮬 시작</button>
+        <button onclick="stopAutoStt('helper')" class="secondary">자동 시뮬 중지</button>
+      </div>
+    </div>
+
     <div class="log" id="helperLog"></div>
   </div>
 
@@ -51,20 +82,85 @@
     <input id="helpeeSessionId" value="helpee-001" placeholder="sessionId">
     <button onclick="connect('helpee')">1. STOMP 연결</button>
     <button onclick="requestMatch()">2. 도움 요청</button>
-    <button onclick="toggleMic('helpee')">마이크 ON/OFF</button>
-    <button onclick="endCall('helpee')">통화 종료</button>
-    <button onclick="disconnect('helpee')">STOMP 연결 종료</button>
+    <button onclick="toggleMic('helpee')" class="secondary">마이크 ON/OFF</button>
+    <button onclick="endCall('helpee')" class="danger">통화 종료 (요약 트리거)</button>
+    <button onclick="disconnect('helpee')" class="secondary">STOMP 연결 종료</button>
     <div id="helpeeStatus" class="disconnected">● STOMP 미연결</div>
     <div id="helpeeLkStatus" class="lk-status">● LiveKit 미연결</div>
+
+    <div class="stt-section">
+      <h4>STT 텍스트 전송</h4>
+      <button onclick="toggleRealStt('helpee')" id="helpeeRealSttBtn" style="background:#cfc;">🎤 실시간 STT 시작</button>
+      <div id="helpeeSttStatus" style="font-size:11px;color:#888;margin-bottom:4px;"></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;">
+        <span style="font-size:10px;color:#aaa;">마이크</span>
+        <div style="flex:1;height:6px;background:#eee;border-radius:3px;overflow:hidden;">
+          <div id="helpeeMicBar" style="height:100%;width:0%;background:#4a90d9;transition:width 0.05s;"></div>
+        </div>
+      </div>
+      <textarea id="helpeeSttText" rows="2" placeholder="어르신이 말할 내용 입력">허리가 많이 아파서요, 병원 예약 좀 도와주세요.</textarea>
+      <button onclick="sendStt('helpee')">수동 전송 → /app/stt/append</button>
+      <div class="stt-auto">
+        <button onclick="startAutoStt('helpee')" class="secondary">자동 시뮬 시작</button>
+        <button onclick="stopAutoStt('helpee')" class="secondary">자동 시뮬 중지</button>
+      </div>
+    </div>
+
     <div class="log" id="helpeeLog"></div>
   </div>
 
+</div>
+
+<hr>
+
+<!-- 누적 트랜스크립트 확인 -->
+<div style="border: 1px solid #aaa; padding: 12px; border-radius: 6px; margin-top: 4px;">
+  <h3 style="margin-top:0">서버 STT 버퍼 확인</h3>
+  <p style="font-size:12px;color:#666;margin:0 0 8px">
+    <b>서버 버퍼 조회</b>는 실제로 서버 메모리에 쌓인 내용을 GET으로 가져옵니다.
+    로컬 미러와 다르면 STT 전송에 문제가 있는 것입니다.
+  </p>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">
+    <button onclick="fetchServerBuffer()" style="width:auto;padding:6px 16px;">서버 버퍼 조회 (GET)</button>
+    <span id="bufferRoomIdDisplay" style="font-size:12px;color:#888;"></span>
+  </div>
+  <div style="display:flex;gap:12px;">
+    <div style="flex:1;">
+      <div style="font-size:12px;color:#555;margin-bottom:4px;">🖥 서버 실제 버퍼</div>
+      <div class="summary-box" id="serverBuffer" style="min-height:80px;">(조회 버튼 클릭)</div>
+    </div>
+    <div style="flex:1;">
+      <div style="font-size:12px;color:#555;margin-bottom:4px;">🖥 로컬 미러 (브라우저 기록)</div>
+      <div class="summary-box" id="transcriptMirror" style="min-height:80px;">(STT 전송 시 여기에 누적됩니다)</div>
+    </div>
+  </div>
+  <button onclick="clearTranscriptMirror()" class="secondary" style="width:auto;margin-top:6px;padding:4px 12px">로컬 미러 초기화</button>
 </div>
 
 <script>
   const stompClients = {};
   const lkRooms = {};
   const roomIds = {};
+  const autoSttTimers = {};
+
+  const helperSttSamples = [
+    "안녕하세요, 오늘 어떻게 도와드릴까요?",
+    "병원 이름이 어떻게 되세요?",
+    "내일 오전 10시로 예약해 드릴게요.",
+    "다른 도움이 필요하신 것 있으세요?",
+    "네, 알겠습니다. 곧 연락 드릴게요."
+  ];
+
+  const helpeeSttSamples = [
+    "허리가 많이 아파서요, 병원 예약 좀 도와주세요.",
+    "정형외과 아무데나 가까운 곳으로 해주세요.",
+    "오전이 좋겠어요.",
+    "감사합니다, 고마워요.",
+    "다른 건 괜찮아요."
+  ];
+
+  let helperSttIdx = 0;
+  let helpeeSttIdx = 0;
 
   function log(role, msg) {
     const el = document.getElementById(role + 'Log');
@@ -80,6 +176,188 @@
 
   function setLkStatus(role, text) {
     document.getElementById(role + 'LkStatus').textContent = '● ' + text;
+  }
+
+  function appendTranscriptMirror(speaker, text) {
+    const el = document.getElementById('transcriptMirror');
+    if (el.textContent === '(STT 전송 시 여기에 누적됩니다)') el.textContent = '';
+    el.textContent += `[${speaker}] ${text}\n`;
+  }
+
+  function clearTranscriptMirror() {
+    document.getElementById('transcriptMirror').textContent = '(STT 전송 시 여기에 누적됩니다)';
+  }
+
+  async function fetchServerBuffer() {
+    const roomId = roomIds['helper'] || roomIds['helpee'];
+    if (!roomId) { alert('아직 매칭 전입니다 — roomId 없음'); return; }
+    document.getElementById('bufferRoomIdDisplay').textContent = 'roomId: ' + roomId;
+    try {
+      const res = await fetch(`/api/calls/${roomId}/transcript`);
+      const text = await res.text();
+      document.getElementById('serverBuffer').textContent = text || '(비어있음)';
+    } catch (e) {
+      document.getElementById('serverBuffer').textContent = '조회 실패: ' + e.message;
+    }
+  }
+
+  // ── 실시간 STT (Web Speech API) ───────────────────────
+  const realSttRecognizers = {};
+  const micAnalysers = {};
+
+  function startMicMeter(role) {
+    navigator.mediaDevices.getUserMedia({ audio: true }).then(stream => {
+      const ctx = new AudioContext();
+      const src = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 256;
+      src.connect(analyser);
+      const data = new Uint8Array(analyser.frequencyBinCount);
+      const bar = document.getElementById(role + 'MicBar');
+      micAnalysers[role] = { ctx, stream, running: true };
+      (function tick() {
+        if (!micAnalysers[role]?.running) return;
+        analyser.getByteFrequencyData(data);
+        const vol = Math.min(100, data.reduce((a, b) => a + b, 0) / data.length * 3);
+        bar.style.width = vol + '%';
+        bar.style.background = vol > 40 ? '#27ae60' : '#4a90d9';
+        requestAnimationFrame(tick);
+      })();
+    }).catch(() => {});
+  }
+
+  function stopMicMeter(role) {
+    if (micAnalysers[role]) {
+      micAnalysers[role].running = false;
+      micAnalysers[role].stream.getTracks().forEach(t => t.stop());
+      micAnalysers[role].ctx.close();
+      delete micAnalysers[role];
+    }
+    const bar = document.getElementById(role + 'MicBar');
+    if (bar) bar.style.width = '0%';
+  }
+
+  function toggleRealStt(role) {
+    if (realSttRecognizers[role]) {
+      realSttRecognizers[role].stop();
+      return;
+    }
+
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      alert('이 브라우저는 Web Speech API를 지원하지 않습니다. Chrome을 사용하세요.');
+      return;
+    }
+
+    const rec = new SpeechRecognition();
+    rec.lang = 'ko-KR';
+    rec.continuous = true;
+    rec.interimResults = true;
+
+    const btn = document.getElementById(role + 'RealSttBtn');
+    const statusEl = document.getElementById(role + 'SttStatus');
+
+    let sttStarted = false;
+    rec.onstart = () => {
+      realSttRecognizers[role] = rec;
+      btn.textContent = '🔴 STT 중지';
+      btn.style.background = '#fcc';
+      if (!sttStarted) {
+        log(role, '[STT] 실시간 인식 시작 (ko-KR)');
+        startMicMeter(role);
+        sttStarted = true;
+      }
+    };
+
+    rec.onresult = (e) => {
+      let interim = '';
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const t = e.results[i][0].transcript;
+        if (e.results[i].isFinal) {
+          document.getElementById(role + 'SttText').value = t;
+          statusEl.textContent = '';
+          sendStt(role);
+        } else {
+          interim += t;
+        }
+      }
+      if (interim) statusEl.textContent = '인식 중: ' + interim;
+    };
+
+    rec.onerror = (e) => {
+      if (e.error === 'aborted' || e.error === 'no-speech') return;
+      log(role, '[STT] 오류: ' + e.error);
+      stopRealStt(role);
+    };
+
+    rec.onend = () => {
+      // 아직 실행 중이면 자동 재시작 (silence/abort로 끊겼을 때)
+      if (realSttRecognizers[role]) {
+        try { rec.start(); } catch (_) {}
+      } else {
+        const btn = document.getElementById(role + 'RealSttBtn');
+        btn.textContent = '🎤 실시간 STT 시작';
+        btn.style.background = '#cfc';
+        statusEl.textContent = '';
+        stopMicMeter(role);
+        log(role, '[STT] 실시간 인식 중지');
+      }
+    };
+
+    rec.start();
+  }
+
+  function stopRealStt(role) {
+    const rec = realSttRecognizers[role];
+    if (!rec) return;
+    delete realSttRecognizers[role];
+    stopMicMeter(role);
+    try { rec.stop(); } catch (_) {}
+  }
+
+  // ── STT ──────────────────────────────────────────────
+  function sendStt(role) {
+    const roomId = roomIds[role];
+    if (!roomId) { log(role, '[STT] 아직 MATCHED 전 — roomId 없음'); return; }
+    if (!stompClients[role]) { log(role, '[STT] STOMP 연결 없음'); return; }
+
+    const text = document.getElementById(role + 'SttText').value.trim();
+    if (!text) { log(role, '[STT] 텍스트를 입력하세요'); return; }
+
+    stompClients[role].publish({
+      destination: '/app/stt/append',
+      body: JSON.stringify({ roomId, text })
+    });
+
+    const speaker = role === 'helpee' ? '어르신' : '도우미';
+    log(role, `[STT] 전송: "${text}"`);
+    appendTranscriptMirror(speaker, text);
+  }
+
+  function startAutoStt(role) {
+    if (autoSttTimers[role]) { log(role, '[STT] 이미 자동 시뮬 실행 중'); return; }
+    const samples = role === 'helper' ? helperSttSamples : helpeeSttSamples;
+    const idxKey = role === 'helper' ? 'helperSttIdx' : 'helpeeSttIdx';
+
+    log(role, '[STT] 자동 시뮬 시작 (2초 간격)');
+    autoSttTimers[role] = setInterval(() => {
+      const idx = role === 'helper' ? helperSttIdx++ : helpeeSttIdx++;
+      if (idx >= samples.length) {
+        stopAutoStt(role);
+        log(role, '[STT] 자동 시뮬 완료 (샘플 소진)');
+        return;
+      }
+      document.getElementById(role + 'SttText').value = samples[idx];
+      sendStt(role);
+    }, 2000);
+  }
+
+  function stopAutoStt(role) {
+    if (autoSttTimers[role]) {
+      clearInterval(autoSttTimers[role]);
+      delete autoSttTimers[role];
+      log(role, '[STT] 자동 시뮬 중지');
+    }
   }
 
   // ── STOMP ──────────────────────────────────────────────
@@ -100,20 +378,23 @@
           const body = JSON.parse(msg.body);
           log(role, '수신:\n' + JSON.stringify(body, null, 2));
 
-          if (body.type === 'MATCHED') {
-            roomIds[role] = body.roomId;
-            client.subscribe('/topic/room/' + body.roomId, (roomMsg) => {
+          const result = body.result || body;
+          if (result.type === 'MATCHED') {
+            roomIds[role] = result.roomId;
+            client.subscribe('/topic/room/' + result.roomId, (roomMsg) => {
               const roomBody = JSON.parse(roomMsg.body);
               log(role, '[방] 수신:\n' + JSON.stringify(roomBody, null, 2));
-              if (roomBody.type === 'ENDED') {
+              const roomResult = roomBody.result || roomBody;
+              if (roomResult.type === 'ENDED') {
+                log(role, '[방] 통화 종료 — Bedrock 요약 비동기 처리 중...');
                 leaveLiveKit(role);
               }
             });
-            log(role, '→ /topic/room/' + body.roomId + ' 구독 완료');
-            await joinLiveKit(role, body.token, body.roomId);
+            log(role, '→ /topic/room/' + result.roomId + ' 구독 완료');
+            await joinLiveKit(role, result.token, result.roomId);
           }
 
-          if (body.type === 'PARTNER_DISCONNECTED') {
+          if (result.type === 'PARTNER_DISCONNECTED') {
             leaveLiveKit(role);
           }
         });
@@ -133,6 +414,7 @@
   }
 
   function disconnect(role) {
+    stopAutoStt(role);
     leaveLiveKit(role);
     if (stompClients[role]) { stompClients[role].deactivate(); delete stompClients[role]; }
   }
@@ -153,11 +435,16 @@
     const roomId = roomIds[role];
     if (!roomId) { alert('MATCHED 후 roomId가 없습니다'); return; }
     if (!stompClients[role]) { alert('먼저 STOMP 연결하세요'); return; }
+    stopAutoStt(role);
+    stopRealStt(role);
     stompClients[role].publish({
       destination: '/app/call/end',
       body: JSON.stringify({ roomId })
     });
-    log(role, '전송 → /app/call/end');
+    log(role, '전송 → /app/call/end  (서버에서 Bedrock 비동기 요약 시작)');
+    clearTranscriptMirror();
+    helperSttIdx = 0;
+    helpeeSttIdx = 0;
   }
 
   // ── LiveKit ────────────────────────────────────────────

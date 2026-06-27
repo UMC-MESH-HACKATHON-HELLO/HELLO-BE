@@ -1,10 +1,13 @@
 package com.mesh.hello.domain.matching.application;
 
+import com.mesh.hello.domain.calling.application.BedrockSummaryService;
+import com.mesh.hello.domain.calling.application.TranscriptBufferService;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.global.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -12,6 +15,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MatchingService {
@@ -20,6 +24,8 @@ public class MatchingService {
     private final MatchingRoomRepository matchingRoomRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final LiveKitService liveKitService;
+    private final TranscriptBufferService transcriptBufferService;
+    private final BedrockSummaryService bedrockSummaryService;
 
     /**
      * 도움 요청자(helpee)가 매칭을 요청한다.
@@ -114,6 +120,7 @@ public class MatchingService {
 
     /**
      * 통화를 정상 종료한다. 방에 있는 양측 모두에게 ENDED를 전송하고 방을 삭제한다.
+     * 누적된 STT 텍스트를 Bedrock으로 비동기 요약 후 DB에 저장한다.
      */
     public void endCall(String sessionId, String roomId) {
         messagingTemplate.convertAndSend(
@@ -121,6 +128,13 @@ public class MatchingService {
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
         );
         matchingRoomRepository.deleteByRoomId(roomId);
+
+        try {
+            String transcript = transcriptBufferService.flushAndGet(roomId);
+            bedrockSummaryService.summarizeAndSave(roomId, transcript);
+        } catch (Exception e) {
+            log.error("통화 요약 요청 실패 roomId={}", roomId, e);
+        }
     }
 
     /**

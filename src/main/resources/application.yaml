@@ -18,12 +18,20 @@ spring:
       hibernate:
         format_sql: true
 
+  task:
+    execution:
+      pool:
+        core-size: 4
+        max-size: 16
+        queue-capacity: 100
+
 livekit:
   url: ${LIVEKIT_URL}
   api-key: ${LIVEKIT_API_KEY}
   api-secret: ${LIVEKIT_API_SECRET}
 
 aws:
+  region: ${AWS_REGION}
   s3:
     bucket: ${S3_BUCKET}
     region: ${AWS_REGION}

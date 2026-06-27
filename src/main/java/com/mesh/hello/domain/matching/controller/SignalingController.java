@@ -1,9 +1,13 @@
 package com.mesh.hello.domain.matching.controller;
 
+import com.mesh.hello.domain.calling.application.TranscriptBufferService;
 import com.mesh.hello.domain.matching.application.MatchingService;
 import com.mesh.hello.domain.matching.dto.SignalMessage;
+import com.mesh.hello.domain.matching.dto.SttMessage;
+import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.global.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -11,11 +15,14 @@ import org.springframework.stereotype.Controller;
 
 import java.security.Principal;
 
+@Slf4j
 @Controller
 @RequiredArgsConstructor
 public class SignalingController {
     private final MatchingService matchingService;
     private final SimpMessagingTemplate messagingTemplate;
+    private final TranscriptBufferService transcriptBufferService;
+    private final MatchingRoomRepository matchingRoomRepository;
 
     // 도우미 대기열 등록 → 대기 중인 helpee 있으면 즉시 매칭
     @MessageMapping("/help/register")
@@ -33,6 +40,20 @@ public class SignalingController {
     @MessageMapping("/call/end")
     public void callEnd(Principal principal, SignalMessage msg) {
         matchingService.endCall(principal.getName(), msg.getRoomId());
+    }
+
+    // STT 텍스트 누적
+    @MessageMapping("/stt/append")
+    public void appendStt(Principal principal, SttMessage msg) {
+        log.info("[STT 수신] roomId={} sessionId={} text={}", msg.getRoomId(), principal.getName(), msg.getText());
+        matchingRoomRepository.findByRoomId(msg.getRoomId()).ifPresent(room -> {
+            String speaker = room.getHelpeeSessionId().equals(principal.getName()) ? "어르신" : "도우미";
+            transcriptBufferService.append(msg.getRoomId(), speaker, msg.getText());
+            log.info("[STT 누적] roomId={} speaker={} text={}", msg.getRoomId(), speaker, msg.getText());
+        });
+        if (matchingRoomRepository.findByRoomId(msg.getRoomId()).isEmpty()) {
+            log.warn("[STT 누락] roomId={}에 해당하는 방 없음 — 매칭 전이거나 이미 종료됨", msg.getRoomId());
+        }
     }
 
     // WebRTC 시그널링 중계 (SDP/ICE)
