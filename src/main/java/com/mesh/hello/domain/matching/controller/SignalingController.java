@@ -8,6 +8,8 @@ import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
+import java.security.Principal;
+
 @Controller
 @RequiredArgsConstructor
 public class SignalingController {
@@ -16,20 +18,20 @@ public class SignalingController {
 
     // 도우미 대기열 등록 → 대기 중인 helpee 있으면 즉시 매칭
     @MessageMapping("/help/register")
-    public void helperRegister(SignalMessage msg) {
-        matchingService.registerHelper(msg.getSessionId());
+    public void helperRegister(Principal principal) {
+        matchingService.registerHelper(principal.getName());
     }
 
     // 어르신 도움 요청 → 매칭 시도
     @MessageMapping("/help/request")
-    public void helpRequest(SignalMessage msg) {
-        matchingService.requestMatch(msg.getSessionId());
+    public void helpRequest(Principal principal) {
+        matchingService.requestMatch(principal.getName());
     }
 
     // 통화 종료
     @MessageMapping("/call/end")
-    public void callEnd(SignalMessage msg) {
-        matchingService.endCall(msg.getSessionId(), msg.getRoomId());
+    public void callEnd(Principal principal, SignalMessage msg) {
+        matchingService.endCall(principal.getName(), msg.getRoomId());
     }
 
     // WebRTC 시그널링 중계 (SDP/ICE)
