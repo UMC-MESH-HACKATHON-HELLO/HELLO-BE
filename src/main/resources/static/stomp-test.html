@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>STOMP 테스트</title>
+  <script src="https://cdn.jsdelivr.net/npm/sockjs-client@1/dist/sockjs.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@stomp/stompjs@7/bundles/stomp.umd.min.js"></script>
+  <style>
+    body { font-family: monospace; max-width: 800px; margin: 20px auto; padding: 0 16px; }
+    .row { display: flex; gap: 16px; }
+    .box { flex: 1; border: 1px solid #ccc; padding: 12px; border-radius: 6px; }
+    h3 { margin-top: 0; }
+    input { width: 100%; box-sizing: border-box; margin-bottom: 8px; padding: 6px; }
+    button { width: 100%; padding: 8px; margin-bottom: 6px; cursor: pointer; }
+    .log { background: #111; color: #0f0; padding: 8px; height: 260px; overflow-y: auto;
+           font-size: 12px; white-space: pre-wrap; border-radius: 4px; }
+    .connected { color: #0f0; } .disconnected { color: #f44; }
+  </style>
+</head>
+<body>
+<h2>STOMP WebSocket 테스트</h2>
+<div class="row">
+
+  <!-- 도우미 -->
+  <div class="box">
+    <h3>도우미 (Helper)</h3>
+    <input id="helperSessionId" value="helper-001" placeholder="sessionId">
+    <button onclick="connect('helper')">연결</button>
+    <button onclick="disconnect('helper')">연결 종료</button>
+    <button onclick="registerHelper()">대기 등록 (/help/register)</button>
+    <button onclick="endCall('helper')">통화 종료 (/call/end)</button>
+    <div id="helperStatus" class="disconnected">● 미연결</div>
+    <div class="log" id="helperLog"></div>
+  </div>
+
+  <!-- 어르신 -->
+  <div class="box">
+    <h3>어르신 (Helpee)</h3>
+    <input id="helpeeSessionId" value="helpee-001" placeholder="sessionId">
+    <button onclick="connect('helpee')">연결</button>
+    <button onclick="disconnect('helpee')">연결 종료</button>
+    <button onclick="requestMatch()">도움 요청 (/help/request)</button>
+    <button onclick="endCall('helpee')">통화 종료 (/call/end)</button>
+    <div id="helpeeStatus" class="disconnected">● 미연결</div>
+    <div class="log" id="helpeeLog"></div>
+  </div>
+
+</div>
+
+<script>
+  const clients = {};
+  const rooms = {};
+
+  function log(role, msg) {
+    const el = document.getElementById(role + 'Log');
+    el.textContent += `[${new Date().toLocaleTimeString()}] ${msg}\n${'─'.repeat(40)}\n`;
+    el.scrollTop = el.scrollHeight;
+  }
+
+  function setStatus(role, text, cls) {
+    const el = document.getElementById(role + 'Status');
+    el.textContent = '● ' + text;
+    el.className = cls;
+  }
+
+  function connect(role) {
+    const sessionId = document.getElementById(role + 'SessionId').value.trim();
+    if (!sessionId) { alert('sessionId를 입력하세요'); return; }
+    if (clients[role]) { log(role, '이미 연결됨'); return; }
+
+    const client = new StompJs.Client({
+      webSocketFactory: () => new SockJS(`http://localhost:8080/ws?sessionId=${sessionId}`),
+      connectHeaders: { sessionId },
+      reconnectDelay: 0,
+      onConnect: () => {
+        setStatus(role, '연결됨 (' + sessionId + ')', 'connected');
+        log(role, 'CONNECTED');
+
+        client.subscribe('/user/queue/signal', (msg) => {
+          const body = JSON.parse(msg.body);
+          log(role, '수신:\n' + JSON.stringify(body, null, 2));
+          if (body.type === 'MATCHED') {
+            rooms[role] = body.roomId;
+            log(role, '→ roomId 저장: ' + body.roomId);
+            client.subscribe('/topic/room/' + body.roomId, (roomMsg) => {
+              const roomBody = JSON.parse(roomMsg.body);
+              log(role, '[방] 수신:\n' + JSON.stringify(roomBody, null, 2));
+            });
+            log(role, '→ /topic/room/' + body.roomId + ' 구독 완료');
+          }
+        });
+      },
+      onDisconnect: () => {
+        setStatus(role, '미연결', 'disconnected');
+        log(role, 'DISCONNECTED');
+        delete clients[role];
+      },
+      onStompError: (frame) => {
+        log(role, 'STOMP ERROR: ' + frame.headers['message']);
+      }
+    });
+
+    client.activate();
+    clients[role] = client;
+  }
+
+  function disconnect(role) {
+    if (clients[role]) { clients[role].deactivate(); delete clients[role]; }
+  }
+
+  function registerHelper() {
+    const sessionId = document.getElementById('helperSessionId').value.trim();
+    if (!clients['helper']) { alert('먼저 연결하세요'); return; }
+    clients['helper'].publish({
+      destination: '/app/help/register',
+      body: JSON.stringify({ sessionId })
+    });
+    log('helper', '전송 → /app/help/register');
+  }
+
+  function requestMatch() {
+    const sessionId = document.getElementById('helpeeSessionId').value.trim();
+    if (!clients['helpee']) { alert('먼저 연결하세요'); return; }
+    clients['helpee'].publish({
+      destination: '/app/help/request',
+      body: JSON.stringify({ sessionId })
+    });
+    log('helpee', '전송 → /app/help/request');
+  }
+
+  function endCall(role) {
+    const sessionId = document.getElementById(role + 'SessionId').value.trim();
+    const roomId = rooms[role];
+    if (!roomId) { alert('MATCHED 후 roomId가 없습니다'); return; }
+    if (!clients[role]) { alert('먼저 연결하세요'); return; }
+    clients[role].publish({
+      destination: '/app/call/end',
+      body: JSON.stringify({ sessionId, roomId })
+    });
+    log(role, '전송 → /app/call/end (roomId: ' + roomId + ')');
+  }
+</script>
+</body>
+</html>
