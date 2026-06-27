@@ -1,43 +1,85 @@
 package com.mesh.hello.global.security.config;
 
+import com.mesh.hello.global.security.RestAuthenticationEntryPoint;
+import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.security.authentication.AuthenticationManager;
+import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
+import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextRepository;
 
+/**
+ * 세션 기반 인증 설정(JWT 아님). 익명 세션 위에 도우미 로그인을 얹는다.
+ *
+ * <ul>
+ *   <li>무인증이 핵심 가치 → 어르신/익명 플로우는 막지 않고 도우미 전용 경로만 보호.</li>
+ *   <li>세션 IF_REQUIRED. 로그인 시 SecurityContext를 세션에 저장 → JSESSIONID로 인증 유지.</li>
+ *   <li>{@code /helper/**} authenticated, 그 외 permitAll.</li>
+ * </ul>
+ */
 @Configuration
-@EnableWebSecurity // Spring Security를 활성화하기 위한 필수 어노테이션
+@EnableWebSecurity
+@RequiredArgsConstructor
 public class SecurityConfig {
 
+    private final RestAuthenticationEntryPoint restAuthenticationEntryPoint;
+
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http,
+                                           SecurityContextRepository securityContextRepository) throws Exception {
         http
-                // 1. REST API 환경이므로 CSRF 보안은 끕니다. (켜두면 POST 요청 시 토큰이 필요해서 막힙니다)
-                .csrf(AbstractHttpConfigurer::disable)
-
-                // 2. HTTP 요청에 대한 권한 설정 (중요★)
+                // MVP: JSON API라 CSRF 비활성화. 세션 쿠키 기반이므로 실서비스 전 반드시 재검토.
+                .csrf(csrf -> csrf.disable())
+                .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
+                .securityContext(sc -> sc.securityContextRepository(securityContextRepository))
                 .authorizeHttpRequests(auth -> auth
-                        // 세션 생성 및 로그아웃 API는 로그인 안 한 상태에서도 접근할 수 있게 열어둡니다.
+                        // 로그인/가입/로그아웃
+                        .requestMatchers("/login", "/signup", "/logout").permitAll()
+                        // 익명 세션 발급(CM102)
                         .requestMatchers("/api/session").permitAll()
-
-                        // (선택 사항) 나중에 설정할 익명 권한별 접근 제한 예시
-                        // .requestMatchers("/api/seller/**").hasRole("GUEST_SELLER")
-                        // .requestMatchers("/api/buyer/**").hasRole("GUEST_BUYER")
-
-                        // 그 외의 모든 요청은 일단 허용 (프로젝트 상황에 따라 .authenticated() 등으로 변경 가능)
+                        // 익명 WebSocket 핸드셰이크/SockJS (어르신·익명 매칭 플로우)
+                        .requestMatchers("/ws/**").permitAll()
+                        // 정적/데모 리소스
+                        .requestMatchers("/", "/error", "/favicon.ico",
+                                "/stomp-test.html", "/livekit-client.umd.min.js", "/h2-console/**").permitAll()
+                        // 도우미 전용 (대기 시작/종료·포인트 조회 등은 여기에 추가)
+                        .requestMatchers("/helper/**").authenticated()
+                        // 그 외는 무인증 허용 — 어르신/익명 플로우가 막히면 안 됨
                         .anyRequest().permitAll()
                 )
-
-                // 3. 기본 익명 사용자(Anonymous) 기능 설정
+                // 팀원 설정 보존: 익명 사용자 기능
                 .anonymous(anonymous -> anonymous
-                        // 앞서 컨트롤러에서 토큰 만들 때 넣었던 "key_for_anonymous"와 일치시킵니다.
-                        // 서버가 이 키를 가지고 익명 토큰의 위조 여부를 검증합니다.
                         .key("key_for_anonymous")
                         .principal("anonymousUser")
-                );
+                )
+                .exceptionHandling(eh -> eh.authenticationEntryPoint(restAuthenticationEntryPoint))
+                .formLogin(form -> form.disable())
+                .httpBasic(basic -> basic.disable())
+                .logout(logout -> logout.disable())          // 커스텀 /logout 사용
+                .headers(headers -> headers.frameOptions(frame -> frame.sameOrigin())); // H2 콘솔용
 
         return http.build();
+    }
+
+    @Bean
+    public SecurityContextRepository securityContextRepository() {
+        return new HttpSessionSecurityContextRepository();
+    }
+
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public AuthenticationManager authenticationManager(AuthenticationConfiguration configuration) throws Exception {
+        return configuration.getAuthenticationManager();
     }
 }
