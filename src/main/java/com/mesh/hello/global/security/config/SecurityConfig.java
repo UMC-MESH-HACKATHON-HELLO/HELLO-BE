@@ -39,7 +39,7 @@ public class SecurityConfig {
     public SecurityFilterChain filterChain(HttpSecurity http,
                                            SecurityContextRepository securityContextRepository) throws Exception {
         http
-                .cors(cors -> cors.configurationSource(corsConfigurationSource()))
+                // .cors(cors -> cors.configurationSource(corsConfigurationSource()))
                 // MVP: JSON API라 CSRF 비활성화. 세션 쿠키 기반이므로 실서비스 전 반드시 재검토.
                 .csrf(csrf -> csrf.disable())
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
