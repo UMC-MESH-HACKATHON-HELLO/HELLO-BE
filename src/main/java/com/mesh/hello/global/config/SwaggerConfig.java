@@ -15,7 +15,7 @@ import org.springframework.context.annotation.Configuration;
 public class SwaggerConfig {
     @Bean
     public OpenAPI swagger() {
-        Info info = new Info().title("UMC10th").description("10기 Swagger").version("0.0.1");
+        Info info = new Info().title("여보세요").description("Team03-여보세요 Swagger").version("0.0.1");
 
         // JWT 토큰 헤더 방식
         String securityScheme = "JWT TOKEN";
