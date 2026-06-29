@@ -22,14 +22,17 @@ jobs:
           key: ${{ secrets.SERVER_KEY }}       # pem 키를 쓰신다면 이것 사용
           # password: ${{ secrets.SERVER_PASSWORD }} # 비밀번호 방식을 쓰신다면 key 대신 이것 사용
           script: |
-            # 1. 프로젝트 폴더로 이동 (본인의 실제 서버 내 프로젝트 경로로 수정하세요)
-            cd /home/ubuntu/HELLO-BE 
+            # 1. 백엔드 폴더로 이동
+            cd /home/ubuntu/mesh-hello-app/HELLO-BE
             
             # 2. 최신 코드 가져오기
             git pull origin main
+
+            # 3. 프로젝트 폴더로 이동
+            cd /home/ubuntu/mesh-hello-app
             
-            # 3. 백엔드 서비스만 콕 집어서 새로 빌드하고 무중단/재실행
+            # 4. 백엔드 서비스만 콕 집어서 새로 빌드하고 무중단/재실행
             docker compose up -d --build hello-backend
             
-            # 4. 미사용 더미 이미지 정리 (서버 용량 관리용)
+            # 5. 미사용 더미 이미지 정리 (서버 용량 관리용)
             docker image prune -f
