@@ -1,8 +1,8 @@
 package com.mesh.hello.domain.stt.controller;
 
 import com.mesh.hello.domain.stt.application.TranscribeService;
-import com.mesh.hello.domain.matching.dto.SignalMessage;
 import com.mesh.hello.domain.stt.dto.AudioChunkMessage;
+import com.mesh.hello.domain.stt.dto.SttStartMessage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
@@ -18,8 +18,8 @@ public class AudioStreamingController {
     private final TranscribeService transcribeService;
 
     @MessageMapping("/stt/start")
-    public void startStt(Principal principal, SignalMessage msg) {
-        transcribeService.startSession(principal.getName(), msg.getRoomId());
+    public void startStt(Principal principal, @Payload SttStartMessage msg) {
+        transcribeService.startSession(principal.getName(), msg.getRoomId(), msg.getRole());
     }
 
     @MessageMapping("/audio/stream")

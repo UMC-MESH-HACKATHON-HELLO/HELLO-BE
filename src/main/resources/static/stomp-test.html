@@ -19,6 +19,9 @@
                        overflow-y: auto; font-size: 13px; white-space: pre-wrap; border-radius: 4px;
                        margin-top: 6px; border: 1px solid #444; }
     .transcript-label { font-size: 12px; color: #888; margin-top: 8px; margin-bottom: 2px; }
+    .summary-area { background: #1e2a1e; color: #b0ffb0; padding: 8px; min-height: 60px;
+                    font-size: 13px; white-space: pre-wrap; border-radius: 4px;
+                    margin-top: 6px; border: 1px solid #2a4a2a; }
     .lk-status { margin: 6px 0; font-size: 13px; }
     .stt-status { margin: 6px 0; font-size: 13px; color: #aaa; }
     .connected { color: #0f0; } .disconnected { color: #f44; }
@@ -45,7 +48,7 @@
     <button onclick="connect('helper')">1. STOMP 연결</button>
     <button onclick="registerHelper()">2. 대기 등록</button>
     <button onclick="toggleMic('helper')">마이크 ON/OFF</button>
-    <button id="helperSttBtn" onclick="toggleStt('helper')" disabled>STT 시작</button>
+    <button id="helperSttBtn" onclick="toggleStt('helper')">STT 일시정지</button>
     <button onclick="endCall('helper')">통화 종료</button>
     <button onclick="disconnect('helper')">STOMP 연결 종료</button>
     <div id="helperStatus" class="disconnected">● STOMP 미연결</div>
@@ -54,6 +57,8 @@
     <div class="log" id="helperLog"></div>
     <div class="transcript-label">실시간 텍스트 (STT)</div>
     <div class="transcript-area" id="helperTranscript"></div>
+    <div class="transcript-label">통화 요약 (Bedrock)</div>
+    <div class="summary-area" id="helperSummary">통화 종료 후 요약이 표시됩니다.</div>
   </div>
 
   <!-- 어르신 -->
@@ -63,7 +68,7 @@
     <button onclick="connect('helpee')">1. STOMP 연결</button>
     <button onclick="requestMatch()">2. 도움 요청</button>
     <button onclick="toggleMic('helpee')">마이크 ON/OFF</button>
-    <button id="helpeeSttBtn" onclick="toggleStt('helpee')" disabled>STT 시작</button>
+    <button id="helpeeSttBtn" onclick="toggleStt('helpee')">STT 일시정지</button>
     <button onclick="endCall('helpee')">통화 종료</button>
     <button onclick="disconnect('helpee')">STOMP 연결 종료</button>
     <div id="helpeeStatus" class="disconnected">● STOMP 미연결</div>
@@ -72,6 +77,8 @@
     <div class="log" id="helpeeLog"></div>
     <div class="transcript-label">실시간 텍스트 (STT)</div>
     <div class="transcript-area" id="helpeeTranscript"></div>
+    <div class="transcript-label">통화 요약 (Bedrock)</div>
+    <div class="summary-area" id="helpeeSummary">통화 종료 후 요약이 표시됩니다.</div>
   </div>
 
 </div>
@@ -139,18 +146,17 @@
 
           if (data?.type === 'MATCHED') {
             roomIds[role] = data.roomId;
+
             client.subscribe('/topic/room/' + data.roomId, (roomMsg) => {
               const roomBody = JSON.parse(roomMsg.body);
               log(role, '[방] 수신:\n' + JSON.stringify(roomBody, null, 2));
               if (roomBody.result?.type === 'ENDED') {
-                stopSttSession(role);
-                leaveLiveKit(role);
+                leaveLiveKit(role);  // STT 중지 + LiveKit 퇴장 일괄 처리
               }
             });
             log(role, '→ /api/v1/topic/room/' + body.roomId + ' 구독 완료');
             await joinLiveKit(role, body.token, body.roomId);
 
-            // STT 결과 구독 (방 전체 — helper/helpee 모두 수신)
             client.subscribe('/topic/transcript/' + data.roomId, (tMsg) => {
               const t = JSON.parse(tMsg.body);
               const speaker = t.speakerSessionId === sessionId ? role : (role === 'helper' ? 'helpee' : 'helper');
@@ -160,22 +166,28 @@
             log(role, '→ /topic/room/' + data.roomId + ' 구독 완료');
             log(role, '→ /topic/transcript/' + data.roomId + ' 구독 완료');
 
-            await joinLiveKit(role, data.token, data.roomId);
-
-            // 매칭 후 STT 버튼 활성화
-            document.getElementById(role + 'SttBtn').disabled = false;
+            await joinLiveKit(role, data.token, data.roomId);  // 내부에서 STT 자동 시작
           }
 
           if (data?.type === 'PARTNER_DISCONNECTED') {
-            stopSttSession(role);
-            leaveLiveKit(role);
+            leaveLiveKit(role);  // STT 중지 + LiveKit 퇴장 일괄 처리
+          }
+
+          if (data?.type === 'CALL_SUMMARY') {
+            if (role === 'helper') {
+              document.getElementById(role + 'Summary').textContent =
+                `[어르신 요청] ${data.requestedHelp}\n\n[제공한 도움] ${data.providedHelp}\n\n[결과] ${data.result}`;
+            } else {
+              document.getElementById(role + 'Summary').textContent =
+                `[도우미가 제공한 도움]\n${data.providedHelp}`;
+            }
+            log(role, '[요약] Bedrock 요약 완료');
           }
         });
       },
       onDisconnect: () => {
         setStatus(role, '미연결', 'disconnected');
         log(role, 'STOMP DISCONNECTED');
-        document.getElementById(role + 'SttBtn').disabled = true;
         delete stompClients[role];
       },
       onStompError: (frame) => {
@@ -188,8 +200,7 @@
   }
 
   function disconnect(role) {
-    stopSttSession(role);
-    leaveLiveKit(role);
+    leaveLiveKit(role);  // STT 중지 + LiveKit 퇴장 일괄 처리
     if (stompClients[role]) { stompClients[role].deactivate(); delete stompClients[role]; }
   }
 
@@ -209,7 +220,6 @@
     const roomId = roomIds[role];
     if (!roomId) { alert('MATCHED 후 roomId가 없습니다'); return; }
     if (!stompClients[role]) { alert('먼저 STOMP 연결하세요'); return; }
-    stopSttSession(role);
     stompClients[role].publish({
       destination: '/api/v1/call/end',
       body: JSON.stringify({ roomId })
@@ -256,6 +266,10 @@
 
       await room.localParticipant.setMicrophoneEnabled(true);
       log(role, '[LiveKit] 마이크 활성화');
+
+      // LiveKit 연결 성공 시 STT 자동 시작
+      await startSttSession(role);
+
     } catch (e) {
       log(role, '[LiveKit] 연결 실패: ' + e.message);
       setLkStatus(role, 'LiveKit 연결 실패');
@@ -264,6 +278,8 @@
   }
 
   async function leaveLiveKit(role) {
+    // STT 자동 중지 후 LiveKit 퇴장
+    await stopSttSession(role);
     if (lkRooms[role]) {
       await lkRooms[role].disconnect();
       delete lkRooms[role];
@@ -292,17 +308,14 @@
     const roomId = roomIds[role];
     const client = stompClients[role];
     if (!roomId || !client) { log(role, 'STT: 매칭 후 사용 가능'); return; }
+    if (sttState[role]?.active) return;  // 이미 활성
 
     try {
-      // 마이크 스트림 획득 (LiveKit과 별개로 Web Audio API용)
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-
-      // AudioContext: 16kHz mono로 설정
       const audioCtx = new AudioContext({ sampleRate: 16000 });
       const source = audioCtx.createMediaStreamSource(stream);
-
-      // ScriptProcessorNode: 4096 샘플 단위로 PCM 캡처
       const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+
       processor.onaudioprocess = (e) => {
         if (!sttState[role]?.active) return;
         const float32 = e.inputBuffer.getChannelData(0);
@@ -318,17 +331,16 @@
 
       sttState[role] = { active: true, audioCtx, processor, source, stream };
 
-      // 백엔드에 STT 세션 시작 알림
       client.publish({
         destination: '/app/stt/start',
-        body: JSON.stringify({ roomId })
+        body: JSON.stringify({ roomId, role })
       });
 
       const btn = document.getElementById(role + 'SttBtn');
-      btn.textContent = 'STT 중지';
+      btn.textContent = 'STT 일시정지';
       btn.className = 'stt-off';
-      setSttStatus(role, 'STT 활성 (스트리밍 중)');
-      log(role, '[STT] 시작 → /app/stt/start (roomId: ' + roomId + ')');
+      setSttStatus(role, 'STT 활성 (자동 스트리밍 중)');
+      log(role, '[STT] 자동 시작');
 
     } catch (e) {
       log(role, '[STT] 마이크 접근 실패: ' + e.message);
@@ -351,10 +363,10 @@
     }
 
     const btn = document.getElementById(role + 'SttBtn');
-    btn.textContent = 'STT 시작';
-    btn.className = 'stt-on';
+    btn.textContent = 'STT 일시정지';
+    btn.className = '';
     setSttStatus(role, 'STT 비활성');
-    log(role, '[STT] 중지 → /app/stt/stop');
+    log(role, '[STT] 자동 중지');
   }
 
   // Float32 PCM → Int16 PCM 변환

@@ -1,8 +1,10 @@
 package com.mesh.hello.domain.matching.application;
 
+import com.mesh.hello.domain.calling.application.BedrockSummarizationService;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
+import com.mesh.hello.domain.stt.application.TranscribeService;
 import com.mesh.hello.global.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
@@ -20,6 +22,8 @@ public class MatchingService {
     private final MatchingRoomRepository matchingRoomRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final LiveKitService liveKitService;
+    private final TranscribeService transcribeService;
+    private final BedrockSummarizationService bedrockSummarizationService;
 
     /**
      * 도움 요청자(helpee)가 매칭을 요청한다.
@@ -116,6 +120,12 @@ public class MatchingService {
      * 통화를 정상 종료한다. 방에 있는 양측 모두에게 ENDED를 전송하고 방을 삭제한다.
      */
     public void endCall(String sessionId, String roomId) {
+        matchingRoomRepository.findByRoomId(roomId).ifPresent(room -> {
+            String transcript = transcribeService.flushTranscript(roomId);
+            bedrockSummarizationService.summarizeAndNotify(
+                    roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
+        });
+
         messagingTemplate.convertAndSend(
                 "/api/v1/topic/room/" + roomId,
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
@@ -132,6 +142,10 @@ public class MatchingService {
         matchingQueueRepository.removeHelpee(sessionId);
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
+            String transcript = transcribeService.flushTranscript(room.getRoomId());
+            bedrockSummarizationService.summarizeAndNotify(
+                    room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
+
             room.counterpartOf(sessionId).ifPresent(counterpart ->
                     messagingTemplate.convertAndSendToUser(
                             counterpart, "/api/v1/queue/signal",
