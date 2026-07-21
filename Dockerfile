@@ -19,4 +19,4 @@ COPY --from=builder /app/build/libs/*.jar app.jar
 EXPOSE 8080
 
 # Java 21 가상머신 최적화 옵션을 추가하여 실행
-ENTRYPOINT ["java", "-jar", "-Dfile.encoding=UTF-8", "-Dspring.profiles.active=prod", "app.jar"]
+ENTRYPOINT ["java", "-jar", "-Dfile.encoding=UTF-8", "app.jar"]
