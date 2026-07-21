@@ -20,7 +20,6 @@ repositories {
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	implementation 'software.amazon.awssdk:s3:2.25.0'
-	implementation 'software.amazon.awssdk:transcribestreaming:2.25.0'
 	implementation 'software.amazon.awssdk:bedrockruntime:2.25.0'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
@@ -29,6 +28,7 @@ dependencies {
 	implementation 'io.livekit:livekit-server:0.6.0'
 	implementation 'org.springframework.boot:spring-boot-starter-data-redis'
 	implementation 'com.github.codemonstur:embedded-redis:1.4.3'
+	implementation 'com.squareup.okhttp3:okhttp:4.12.0'
 	compileOnly 'org.projectlombok:lombok'
 	runtimeOnly 'com.mysql:mysql-connector-j'
 	annotationProcessor 'org.projectlombok:lombok'
