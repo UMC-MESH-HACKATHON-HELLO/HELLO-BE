@@ -21,9 +21,9 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  * 인증·메트릭·관측 관련 요소를 모두 제거하고, 익명 연결에 필요한 최소 구성만 남겼다.</p>
  *
  * <ul>
- *   <li>엔드포인트 {@code /ws} (SockJS) + 핸드셰이크 인터셉터 2종(종료거부, sessionId 확정)</li>
- *   <li>심플 브로커 {@code /topic}, {@code /queue} + heartbeat 4000/4000 + 전용 TaskScheduler</li>
- *   <li>애플리케이션 prefix {@code /app}</li>
+ *   <li>엔드포인트 {@code /api/v1/ws} (SockJS) + 핸드셰이크 인터셉터 2종(종료거부, sessionId 확정)</li>
+ *   <li>심플 브로커 {@code /api/v1/topic}, {@code /api/v1/queue} + heartbeat 4000/4000 + 전용 TaskScheduler</li>
+ *   <li>애플리케이션 prefix {@code /api/v1}</li>
  *   <li>인바운드 채널 인터셉터: 익명 Principal 등록 → rate limit</li>
  * </ul>
  */
@@ -48,7 +48,7 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
-        registry.addEndpoint("/ws")
+        registry.addEndpoint("/api/v1/ws")
             .addInterceptors(shutdownAwareHandshakeInterceptor, sessionIdHandshakeInterceptor)
             .setAllowedOriginPatterns("*")
             .withSockJS();
@@ -56,10 +56,10 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
 
     @Override
     public void configureMessageBroker(MessageBrokerRegistry registry) {
-        registry.enableSimpleBroker("/topic", "/queue")
+        registry.enableSimpleBroker("/api/v1/topic", "/api/v1/queue")
             .setHeartbeatValue(new long[]{4000, 4000})
             .setTaskScheduler(webSocketHeartbeatScheduler());
-        registry.setApplicationDestinationPrefixes("/app");
+        registry.setApplicationDestinationPrefixes("/api/v1");
     }
 
     @Override

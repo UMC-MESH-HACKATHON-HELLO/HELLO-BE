@@ -25,7 +25,7 @@ import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
  * <ul>
  *   <li>무인증이 핵심 가치 → 어르신/익명 플로우는 막지 않고 도우미 전용 경로만 보호.</li>
  *   <li>세션 IF_REQUIRED. 로그인 시 SecurityContext를 세션에 저장 → JSESSIONID로 인증 유지.</li>
- *   <li>{@code /helper/**} authenticated, 그 외 permitAll.</li>
+ *   <li>{@code /api/v1/helper/**} authenticated, 그 외 permitAll.</li>
  * </ul>
  */
 @Configuration
@@ -46,11 +46,11 @@ public class SecurityConfig {
                 .securityContext(sc -> sc.securityContextRepository(securityContextRepository))
                 .authorizeHttpRequests(auth -> auth
                         // 로그인/가입/로그아웃
-                        .requestMatchers("/login", "/signup", "/logout").permitAll()
+                        .requestMatchers("/api/v1/login", "/api/v1/signup", "/api/v1/logout").permitAll()
                         // 익명 세션 발급(CM102)
-                        .requestMatchers("/api/session").permitAll()
+                        .requestMatchers("/api/v1/session").permitAll()
                         // 익명 WebSocket 핸드셰이크/SockJS (어르신·익명 매칭 플로우)
-                        .requestMatchers("/ws/**").permitAll()
+                        .requestMatchers("/api/v1/ws/**").permitAll()
                         // Swagger UI
                         .requestMatchers("/swagger-ui/**", "/swagger-ui.html",
                                 "/v3/api-docs/**", "/api-docs/**").permitAll()
@@ -58,7 +58,7 @@ public class SecurityConfig {
                         .requestMatchers("/", "/error", "/favicon.ico",
                                 "/stomp-test.html", "/livekit-client.umd.min.js", "/h2-console/**").permitAll()
                         // 도우미 전용 (대기 시작/종료·포인트 조회 등은 여기에 추가)
-                        .requestMatchers("/helper/**").authenticated()
+                        .requestMatchers("/api/v1/helper/**").authenticated()
                         // 그 외는 무인증 허용 — 어르신/익명 플로우가 막히면 안 됨
                         .anyRequest().permitAll()
                 )
