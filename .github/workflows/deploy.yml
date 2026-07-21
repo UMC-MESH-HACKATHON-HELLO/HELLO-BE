@@ -1,9 +1,12 @@
 name: Deploy to Cloud Server
 
 on:
-  push:
-    branches:
-      - main  # main 브랜치에 푸시가 일어나면 작동합니다.
+#  push:
+#    branches:
+#      - main
+  workflow_dispatch:
+
+
 
 jobs:
   deploy:
