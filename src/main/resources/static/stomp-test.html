@@ -57,7 +57,7 @@
     <div class="log" id="helperLog"></div>
     <div class="transcript-label">실시간 텍스트 (STT)</div>
     <div class="transcript-area" id="helperTranscript"></div>
-    <div class="transcript-label">통화 요약 (Bedrock)</div>
+    <div class="transcript-label">통화 요약 (Gemini)</div>
     <div class="summary-area" id="helperSummary">통화 종료 후 요약이 표시됩니다.</div>
   </div>
 
@@ -77,7 +77,7 @@
     <div class="log" id="helpeeLog"></div>
     <div class="transcript-label">실시간 텍스트 (STT)</div>
     <div class="transcript-area" id="helpeeTranscript"></div>
-    <div class="transcript-label">통화 요약 (Bedrock)</div>
+    <div class="transcript-label">통화 요약 (Gemini)</div>
     <div class="summary-area" id="helpeeSummary">통화 종료 후 요약이 표시됩니다.</div>
   </div>
 
@@ -181,7 +181,7 @@
               document.getElementById(role + 'Summary').textContent =
                 `[도우미가 제공한 도움]\n${data.providedHelp}`;
             }
-            log(role, '[요약] Bedrock 요약 완료');
+            log(role, '[요약] Gemini 요약 완료');
           }
         });
       },

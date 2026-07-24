@@ -7,28 +7,30 @@ import com.mesh.hello.domain.calling.repository.CallSummaryRepository;
 import com.mesh.hello.global.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.MediaType;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import software.amazon.awssdk.core.SdkBytes;
-import software.amazon.awssdk.services.bedrockruntime.BedrockRuntimeClient;
-import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelRequest;
-import software.amazon.awssdk.services.bedrockruntime.model.InvokeModelResponse;
+import org.springframework.web.client.RestClient;
 
 import java.util.Map;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
-public class BedrockSummarizationService {
+public class GeminiSummarizationService {
 
-    private static final String MODEL_ID = "apac.amazon.nova-micro-v1:0";
+    private static final String MODEL_ID = "gemini-2.5-flash-lite";
 
-    private final BedrockRuntimeClient bedrockRuntimeClient;
+    private final RestClient geminiRestClient;
     private final CallSummaryRepository callSummaryRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Value("${gemini.api-key}")
+    private String apiKey;
 
     @Async
     @Transactional
@@ -40,7 +42,7 @@ public class BedrockSummarizationService {
         }
 
         try {
-            JsonNode summary = callBedrock(transcript);
+            JsonNode summary = callGemini(transcript);
 
             String requestedHelp = summary.path("requestedHelp").asText();
             String providedHelp  = summary.path("providedHelp").asText();
@@ -76,29 +78,28 @@ public class BedrockSummarizationService {
         }
     }
 
-    private JsonNode callBedrock(String transcript) throws Exception {
-        // Amazon Nova 요청 형식
-        String requestBody = objectMapper.writeValueAsString(Map.of(
-                "messages", new Object[]{
-                        Map.of("role", "user", "content", new Object[]{
+    private JsonNode callGemini(String transcript) throws Exception {
+        // Gemini generateContent 요청 형식
+        Map<String, Object> requestBody = Map.of(
+                "contents", new Object[]{
+                        Map.of("parts", new Object[]{
                                 Map.of("text", buildPrompt(transcript))
                         })
                 },
-                "inferenceConfig", Map.of("maxTokens", 1024)
-        ));
+                "generationConfig", Map.of("maxOutputTokens", 1024)
+        );
 
-        InvokeModelRequest request = InvokeModelRequest.builder()
-                .modelId(MODEL_ID)
-                .contentType("application/json")
-                .accept("application/json")
-                .body(SdkBytes.fromUtf8String(requestBody))
-                .build();
+        String responseBody = geminiRestClient.post()
+                .uri("/models/{model}:generateContent", MODEL_ID)
+                .header("x-goog-api-key", apiKey)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(requestBody)
+                .retrieve()
+                .body(String.class);
 
-        InvokeModelResponse response = bedrockRuntimeClient.invokeModel(request);
-
-        // Amazon Nova 응답 형식: output.message.content[0].text
-        String responseText = objectMapper.readTree(response.body().asUtf8String())
-                .path("output").path("message").path("content").get(0).path("text").asText();
+        // Gemini 응답 형식: candidates[0].content.parts[0].text
+        String responseText = objectMapper.readTree(responseBody)
+                .path("candidates").get(0).path("content").path("parts").get(0).path("text").asText();
 
         String jsonStr = responseText.replaceAll("(?s)```json\\s*|```", "").trim();
         return objectMapper.readTree(jsonStr);

@@ -41,3 +41,6 @@ aws:
 rtzr:
   client-id: ${RTZR_CLIENT_ID}
   client-secret: ${RTZR_CLIENT_SECRET}
+
+gemini:
+  api-key: ${GEMINI_API_KEY}

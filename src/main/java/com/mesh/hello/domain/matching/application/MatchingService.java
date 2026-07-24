@@ -1,6 +1,6 @@
 package com.mesh.hello.domain.matching.application;
 
-import com.mesh.hello.domain.calling.application.BedrockSummarizationService;
+import com.mesh.hello.domain.calling.application.GeminiSummarizationService;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
@@ -23,7 +23,7 @@ public class MatchingService {
     private final SimpMessagingTemplate messagingTemplate;
     private final LiveKitService liveKitService;
     private final TranscribeService transcribeService;
-    private final BedrockSummarizationService bedrockSummarizationService;
+    private final GeminiSummarizationService geminiSummarizationService;
 
     /**
      * 도움 요청자(helpee)가 매칭을 요청한다.
@@ -122,7 +122,7 @@ public class MatchingService {
     public void endCall(String sessionId, String roomId) {
         matchingRoomRepository.findByRoomId(roomId).ifPresent(room -> {
             String transcript = transcribeService.flushTranscript(roomId);
-            bedrockSummarizationService.summarizeAndNotify(
+            geminiSummarizationService.summarizeAndNotify(
                     roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
         });
 
@@ -143,7 +143,7 @@ public class MatchingService {
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
             String transcript = transcribeService.flushTranscript(room.getRoomId());
-            bedrockSummarizationService.summarizeAndNotify(
+            geminiSummarizationService.summarizeAndNotify(
                     room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
 
             room.counterpartOf(sessionId).ifPresent(counterpart ->
