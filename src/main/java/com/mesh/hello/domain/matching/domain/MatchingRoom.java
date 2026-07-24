@@ -2,6 +2,7 @@ package com.mesh.hello.domain.matching.domain;
 
 import lombok.Getter;
 
+import java.time.LocalDateTime;
 import java.util.Optional;
 
 /**
@@ -16,11 +17,13 @@ public class MatchingRoom {
     private final String roomId;
     private final String helpeeSessionId;
     private final String helperSessionId;
+    private final LocalDateTime matchedAt;
 
     public MatchingRoom(String roomId, String helpeeSessionId, String helperSessionId) {
         this.roomId = roomId;
         this.helpeeSessionId = helpeeSessionId;
         this.helperSessionId = helperSessionId;
+        this.matchedAt = LocalDateTime.now();
     }
 
     /** 해당 sessionId가 이 방의 참가자인지 여부. */

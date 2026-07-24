@@ -1,10 +1,12 @@
 package com.mesh.hello.domain.matching.application;
 
+import com.mesh.hello.domain.calling.application.GeminiSummarizationService;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.InMemoryMatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.InMemoryMatchingRoomRepository;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
+import com.mesh.hello.domain.stt.application.TranscribeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,6 +37,12 @@ class MatchingServiceTest {
     @Mock
     private LiveKitService liveKitService;
 
+    @Mock
+    private TranscribeService transcribeService;
+
+    @Mock
+    private GeminiSummarizationService geminiSummarizationService;
+
     private MatchingQueueRepository matchingQueueRepository;
     private MatchingRoomRepository matchingRoomRepository;
     private MatchingService matchingService;
@@ -47,7 +55,9 @@ class MatchingServiceTest {
                 matchingQueueRepository,
                 matchingRoomRepository,
                 messagingTemplate,
-                liveKitService
+                liveKitService,
+                transcribeService,
+                geminiSummarizationService
         );
     }
 

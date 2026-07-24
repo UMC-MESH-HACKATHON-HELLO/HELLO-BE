@@ -10,6 +10,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -122,6 +124,9 @@ public class MatchingService {
     public void endCall(String sessionId, String roomId) {
         matchingRoomRepository.findByRoomId(roomId).ifPresent(room -> {
             String transcript = transcribeService.flushTranscript(roomId);
+            int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
+            geminiSummarizationService.markPending(
+                    roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
             geminiSummarizationService.summarizeAndNotify(
                     roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
         });
@@ -143,6 +148,9 @@ public class MatchingService {
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
             String transcript = transcribeService.flushTranscript(room.getRoomId());
+            int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
+            geminiSummarizationService.markPending(
+                    room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
             geminiSummarizationService.summarizeAndNotify(
                     room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
 

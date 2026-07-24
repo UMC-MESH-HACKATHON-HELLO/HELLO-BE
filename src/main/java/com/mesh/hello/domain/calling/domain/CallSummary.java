@@ -32,15 +32,32 @@ public class CallSummary {
     private String summary;
 
     @Column(nullable = false)
+    private int durationSec;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private SummaryStatus status;
+
     private LocalDateTime createdAt;
 
-    public CallSummary(String roomId, String helpeeSessionId, String helperSessionId,
-                       String transcript, String summary) {
+    /** 통화 종료 직후, AI 요약이 완성되기 전 PENDING 상태로 먼저 저장한다. */
+    public CallSummary(String roomId, String helpeeSessionId, String helperSessionId, int durationSec) {
         this.roomId = roomId;
         this.helpeeSessionId = helpeeSessionId;
         this.helperSessionId = helperSessionId;
+        this.durationSec = durationSec;
+        this.status = SummaryStatus.PENDING;
+    }
+
+    /** AI 요약이 완성되면 원문·요약 텍스트를 채우고 COMPLETED로 전환한다. */
+    public void complete(String transcript, String summary) {
         this.transcript = transcript;
         this.summary = summary;
+        this.status = SummaryStatus.COMPLETED;
         this.createdAt = LocalDateTime.now();
+    }
+
+    public enum SummaryStatus {
+        PENDING, COMPLETED
     }
 }

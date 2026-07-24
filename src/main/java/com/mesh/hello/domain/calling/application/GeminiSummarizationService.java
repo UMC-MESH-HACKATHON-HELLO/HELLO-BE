@@ -3,8 +3,11 @@ package com.mesh.hello.domain.calling.application;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mesh.hello.domain.calling.domain.CallSummary;
+import com.mesh.hello.domain.calling.dto.CallSummaryResponse;
 import com.mesh.hello.domain.calling.repository.CallSummaryRepository;
+import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ApiResponse;
+import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -32,12 +35,23 @@ public class GeminiSummarizationService {
     @Value("${gemini.api-key}")
     private String apiKey;
 
+    /** 통화 종료 직후 동기 호출. 요약이 완성되기 전이라도 조회 API가 202를 반환할 수 있도록 PENDING 레코드를 먼저 남긴다. */
+    @Transactional
+    public void markPending(String roomId, String helpeeSessionId, String helperSessionId, int durationSec) {
+        callSummaryRepository.save(new CallSummary(roomId, helpeeSessionId, helperSessionId, durationSec));
+    }
+
     @Async
     @Transactional
     public void summarizeAndNotify(String roomId, String helpeeSessionId,
                                    String helperSessionId, String transcript) {
+        CallSummary pending = callSummaryRepository.findTopByRoomIdOrderByIdDesc(roomId).orElse(null);
+
         if (transcript == null || transcript.isBlank()) {
             log.info("요약 생략 — 텍스트 없음 (room: {})", roomId);
+            if (pending != null) {
+                pending.complete(null, "통화 내용이 없어 요약을 생성하지 않았습니다.");
+            }
             return;
         }
 
@@ -47,11 +61,12 @@ public class GeminiSummarizationService {
             String requestedHelp = summary.path("requestedHelp").asText();
             String providedHelp  = summary.path("providedHelp").asText();
             String result        = summary.path("result").asText();
-            String fullSummary   = summary.toString();
+            String summaryText   = "요청: %s\n제공된 도움: %s\n결과: %s"
+                    .formatted(requestedHelp, providedHelp, result);
 
-            callSummaryRepository.save(
-                    new CallSummary(roomId, helpeeSessionId, helperSessionId, transcript, fullSummary)
-            );
+            if (pending != null) {
+                pending.complete(transcript, summaryText);
+            }
 
             // 도우미: 전체 요약
             messagingTemplate.convertAndSendToUser(
@@ -75,7 +90,22 @@ public class GeminiSummarizationService {
 
         } catch (Exception e) {
             log.error("통화 요약 실패 (room: {})", roomId, e);
+            if (pending != null) {
+                pending.complete(transcript, "AI 요약 생성에 실패했습니다.");
+            }
         }
+    }
+
+    @Transactional(readOnly = true)
+    public CallSummaryResponse getSummary(String roomId) {
+        CallSummary summary = callSummaryRepository.findTopByRoomIdOrderByIdDesc(roomId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND, "요약을 찾을 수 없습니다."));
+
+        if (summary.getStatus() == CallSummary.SummaryStatus.PENDING) {
+            throw new BusinessException(ErrorCode.SUMMARY_PENDING);
+        }
+
+        return CallSummaryResponse.from(summary);
     }
 
     private JsonNode callGemini(String transcript) throws Exception {
