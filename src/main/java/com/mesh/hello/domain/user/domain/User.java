@@ -38,7 +38,7 @@ public class User {
     @Column
     private String nickname;
 
-    /** 통화당 적립 포인트. 적립 로직은 이번 범위 아님(필드만 보유). */
+    /** 보유 포인트 총합. 실제 적립/차감 내역은 {@code PointHistory}(인메모리)로 관리한다. */
     @Column(nullable = false)
     private long points = 0L;
 
@@ -48,6 +48,11 @@ public class User {
         this.password = password;
         this.nickname = nickname;
         this.points = 0L;
+    }
+
+    /** 포인트를 적립(양수)하거나 차감(음수)한다. */
+    public void addPoints(long amount) {
+        this.points += amount;
     }
 
 }

@@ -1,10 +1,12 @@
 package com.mesh.hello.domain.matching.application;
 
+import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.InMemoryMatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.InMemoryMatchingRoomRepository;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
+import com.mesh.hello.domain.reward.application.PointService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -35,6 +37,12 @@ class MatchingServiceTest {
     @Mock
     private LiveKitService liveKitService;
 
+    @Mock
+    private SessionAccountRepository sessionAccountRepository;
+
+    @Mock
+    private PointService pointService;
+
     private MatchingQueueRepository matchingQueueRepository;
     private MatchingRoomRepository matchingRoomRepository;
     private MatchingService matchingService;
@@ -47,7 +55,9 @@ class MatchingServiceTest {
                 matchingQueueRepository,
                 matchingRoomRepository,
                 messagingTemplate,
-                liveKitService
+                liveKitService,
+                sessionAccountRepository,
+                pointService
         );
     }
 
@@ -207,6 +217,35 @@ class MatchingServiceTest {
             assertThat(resultOf(endedCaptor.getValue())).isEqualTo(Map.of("type", "ENDED"));
             assertThat(matchingRoomRepository.findBySessionId("helpee-1")).isEmpty();
             assertThat(matchingRoomRepository.findBySessionId("helper-1")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("로그인된 도우미가 통화 종료 → 포인트 적립")
+        void endCallAwardsPointsToLoggedInHelper() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(sessionAccountRepository.findUserId("helper-1")).willReturn(Optional.of(42L));
+            matchingService.requestMatch("helpee-1");
+
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+
+            matchingService.endCall("helpee-1", roomId);
+
+            verify(pointService).awardCallCompletePoints(42L, roomId);
+        }
+
+        @Test
+        @DisplayName("로그인하지 않은 도우미가 통화 종료 → 포인트 미적립")
+        void endCallSkipsPointsForAnonymousHelper() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+
+            matchingService.endCall("helpee-1", roomId);
+
+            verify(pointService, never()).awardCallCompletePoints(any(), anyString());
         }
     }
 

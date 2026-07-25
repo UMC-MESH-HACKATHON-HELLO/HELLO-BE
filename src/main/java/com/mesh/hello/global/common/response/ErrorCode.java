@@ -18,6 +18,7 @@ public enum ErrorCode {
     ROLE_NOT_ALLOWED(403, "허용되지 않은 역할 호출입니다."),
     ALREADY_IN_CALL(409, "이미 통화 중입니다."),
     NOT_FOUND(404, "대상 룸 또는 요청을 찾을 수 없습니다."),
+    INVALID_PAGING(400, "page/size 파라미터가 올바르지 않습니다."),
 
     // 인증/로그인
     LOGIN_FAILED(401, "아이디 또는 비밀번호가 일치하지 않습니다."),
