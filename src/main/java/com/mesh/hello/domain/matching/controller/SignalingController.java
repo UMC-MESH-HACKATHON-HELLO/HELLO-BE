@@ -38,6 +38,6 @@ public class SignalingController {
     // WebRTC 시그널링 중계 (SDP/ICE)
     @MessageMapping("/signal/{roomId}")
     public void signal(@DestinationVariable String roomId, SignalMessage msg) {
-        messagingTemplate.convertAndSend("/topic/room/" + roomId, ApiResponse.ok("시그널을 중계합니다.", msg));
+        messagingTemplate.convertAndSend("/api/v1/topic/room/" + roomId, ApiResponse.ok("시그널을 중계합니다.", msg));
     }
 }

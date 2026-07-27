@@ -89,27 +89,27 @@
     if (stompClients[role]) { log(role, '이미 STOMP 연결됨'); return; }
 
     const client = new StompJs.Client({
-      webSocketFactory: () => new SockJS(`${location.origin}/ws?sessionId=${sessionId}`),
+      webSocketFactory: () => new SockJS(`${location.origin}/api/v1/ws?sessionId=${sessionId}`),
       connectHeaders: { sessionId },
       reconnectDelay: 0,
       onConnect: () => {
         setStatus(role, '연결됨 (' + sessionId + ')', 'connected');
         log(role, 'STOMP CONNECTED');
 
-        client.subscribe('/user/queue/signal', async (msg) => {
+        client.subscribe('/user/api/v1/queue/signal', async (msg) => {
           const body = JSON.parse(msg.body);
           log(role, '수신:\n' + JSON.stringify(body, null, 2));
 
           if (body.type === 'MATCHED') {
             roomIds[role] = body.roomId;
-            client.subscribe('/topic/room/' + body.roomId, (roomMsg) => {
+            client.subscribe('/api/v1/topic/room/' + body.roomId, (roomMsg) => {
               const roomBody = JSON.parse(roomMsg.body);
               log(role, '[방] 수신:\n' + JSON.stringify(roomBody, null, 2));
               if (roomBody.type === 'ENDED') {
                 leaveLiveKit(role);
               }
             });
-            log(role, '→ /topic/room/' + body.roomId + ' 구독 완료');
+            log(role, '→ /api/v1/topic/room/' + body.roomId + ' 구독 완료');
             await joinLiveKit(role, body.token, body.roomId);
           }
 
@@ -139,14 +139,14 @@
 
   function registerHelper() {
     if (!stompClients['helper']) { alert('먼저 STOMP 연결하세요'); return; }
-    stompClients['helper'].publish({ destination: '/app/help/register', body: '{}' });
-    log('helper', '전송 → /app/help/register');
+    stompClients['helper'].publish({ destination: '/api/v1/help/register', body: '{}' });
+    log('helper', '전송 → /api/v1/help/register');
   }
 
   function requestMatch() {
     if (!stompClients['helpee']) { alert('먼저 STOMP 연결하세요'); return; }
-    stompClients['helpee'].publish({ destination: '/app/help/request', body: '{}' });
-    log('helpee', '전송 → /app/help/request');
+    stompClients['helpee'].publish({ destination: '/api/v1/help/request', body: '{}' });
+    log('helpee', '전송 → /api/v1/help/request');
   }
 
   function endCall(role) {
@@ -154,10 +154,10 @@
     if (!roomId) { alert('MATCHED 후 roomId가 없습니다'); return; }
     if (!stompClients[role]) { alert('먼저 STOMP 연결하세요'); return; }
     stompClients[role].publish({
-      destination: '/app/call/end',
+      destination: '/api/v1/call/end',
       body: JSON.stringify({ roomId })
     });
-    log(role, '전송 → /app/call/end');
+    log(role, '전송 → /api/v1/call/end');
   }
 
   // ── LiveKit ────────────────────────────────────────────

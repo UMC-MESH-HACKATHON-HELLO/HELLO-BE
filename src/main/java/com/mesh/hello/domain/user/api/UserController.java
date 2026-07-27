@@ -11,7 +11,6 @@ import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.time.LocalDateTime;
@@ -19,7 +18,6 @@ import java.util.List;
 import java.util.Map;
 
 @RestController
-@RequestMapping("/api")
 @RequiredArgsConstructor
 public class UserController {
 
@@ -53,7 +51,7 @@ public class UserController {
         return Map.of("sessionId", session.getId());
     }
 
-    @PostMapping("/call/end")
+    @PostMapping("/session/end")
     public Map<String, String> endSession(
             HttpServletRequest request
     ) {

@@ -32,7 +32,7 @@ public class MatchingService {
         if (helperOpt.isEmpty()) {
             matchingQueueRepository.pushHelpee(helpeeSessionId);
             messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/queue/signal",
+                    helpeeSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
             );
             return;
@@ -49,12 +49,12 @@ public class MatchingService {
             matchingRoomRepository.save(room);
 
             messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/queue/signal",
+                    helpeeSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken))
             );
             messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/queue/signal",
+                    helperSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken))
             );
@@ -63,7 +63,7 @@ public class MatchingService {
             // 토큰 발급 실패 시 도우미 다시 큐에 넣고 helpee에게 실패 알림
             matchingQueueRepository.pushHelper(helperSessionId);
             messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/queue/signal",
+                    helpeeSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
             );
         }
@@ -79,7 +79,7 @@ public class MatchingService {
         if (helpeeOpt.isEmpty()) {
             matchingQueueRepository.pushHelper(helperSessionId);
             messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/queue/signal",
+                    helperSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
             );
             return;
@@ -96,12 +96,12 @@ public class MatchingService {
             matchingRoomRepository.save(room);
 
             messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/queue/signal",
+                    helpeeSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken))
             );
             messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/queue/signal",
+                    helperSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken))
             );
@@ -117,7 +117,7 @@ public class MatchingService {
      */
     public void endCall(String sessionId, String roomId) {
         messagingTemplate.convertAndSend(
-                "/topic/room/" + roomId,
+                "/api/v1/topic/room/" + roomId,
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
         );
         matchingRoomRepository.deleteByRoomId(roomId);
@@ -134,7 +134,7 @@ public class MatchingService {
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
             room.counterpartOf(sessionId).ifPresent(counterpart ->
                     messagingTemplate.convertAndSendToUser(
-                            counterpart, "/queue/signal",
+                            counterpart, "/api/v1/queue/signal",
                             ApiResponse.ok("상대방의 연결이 종료되었습니다.", Map.of("type", "PARTNER_DISCONNECTED"))
                     )
             );

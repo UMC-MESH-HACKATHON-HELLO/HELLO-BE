@@ -10,7 +10,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 도우미 전용 엔드포인트(인증 필요). SecurityConfig에서 {@code /helper/**} authenticated.
+ * 도우미 전용 엔드포인트(인증 필요). SecurityConfig에서 {@code /api/v1/helper/**} authenticated.
  */
 @RestController
 @RequestMapping("/helper")

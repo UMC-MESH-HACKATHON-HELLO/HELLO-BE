@@ -7,7 +7,7 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
 @RestController
-@RequestMapping("/api/calls")
+@RequestMapping("/call")
 @RequiredArgsConstructor
 public class CallController {
 
