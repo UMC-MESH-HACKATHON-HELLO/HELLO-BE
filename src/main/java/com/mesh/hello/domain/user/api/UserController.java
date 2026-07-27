@@ -51,7 +51,7 @@ public class UserController {
         return Map.of("sessionId", session.getId());
     }
 
-    @PostMapping("/call/end")
+    @PostMapping("/session/end")
     public Map<String, String> endSession(
             HttpServletRequest request
     ) {
