@@ -45,8 +45,10 @@ public class SecurityConfig {
                 .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.IF_REQUIRED))
                 .securityContext(sc -> sc.securityContextRepository(securityContextRepository))
                 .authorizeHttpRequests(auth -> auth
-                        // 로그인/가입/로그아웃
-                        .requestMatchers("/login", "/signup", "/logout").permitAll()
+                        // 로그인/가입 (비인증 허용)
+                        .requestMatchers("/login", "/signup").permitAll()
+                        // 로그아웃은 인증된 사용자만
+                        .requestMatchers("/logout").authenticated()
                         // 익명 세션 발급(CM102)
                         .requestMatchers("/api/session").permitAll()
                         // 익명 WebSocket 핸드셰이크/SockJS (어르신·익명 매칭 플로우)
