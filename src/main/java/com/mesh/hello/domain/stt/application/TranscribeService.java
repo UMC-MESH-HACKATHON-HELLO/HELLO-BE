@@ -108,7 +108,7 @@ public class TranscribeService {
         }
 
         TranscriptMessage msg = new TranscriptMessage(sessionId, text, isFinal);
-        messagingTemplate.convertAndSend("/topic/transcript/" + roomId, msg);
+        messagingTemplate.convertAndSend("/api/v1/topic/transcript/" + roomId, msg);
     }
 
     public void sendAudio(String sessionId, byte[] pcmData) {

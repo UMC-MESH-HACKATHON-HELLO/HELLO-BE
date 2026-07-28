@@ -70,7 +70,7 @@ public class GeminiSummarizationService {
 
             // 도우미: 전체 요약
             messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/queue/signal",
+                    helperSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("통화 요약이 완료되었습니다.",
                             Map.of("type", "CALL_SUMMARY",
                                     "requestedHelp", requestedHelp,
@@ -80,7 +80,7 @@ public class GeminiSummarizationService {
 
             // 어르신: 도우미가 제공한 도움만
             messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/queue/signal",
+                    helpeeSessionId, "/api/v1/queue/signal",
                     ApiResponse.ok("통화 요약이 완료되었습니다.",
                             Map.of("type", "CALL_SUMMARY",
                                     "providedHelp", providedHelp))

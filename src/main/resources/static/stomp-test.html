@@ -138,33 +138,27 @@
         client.subscribe('/user/api/v1/queue/signal', async (msg) => {
           const body = JSON.parse(msg.body);
           log(role, '수신:\n' + JSON.stringify(body, null, 2));
-
-          if (body.type === 'MATCHED') {
-            roomIds[role] = body.roomId;
-            client.subscribe('/api/v1/topic/room/' + body.roomId, (roomMsg) => {
           const data = body.result;
 
           if (data?.type === 'MATCHED') {
             roomIds[role] = data.roomId;
 
-            client.subscribe('/topic/room/' + data.roomId, (roomMsg) => {
+            client.subscribe('/api/v1/topic/room/' + data.roomId, (roomMsg) => {
               const roomBody = JSON.parse(roomMsg.body);
               log(role, '[방] 수신:\n' + JSON.stringify(roomBody, null, 2));
               if (roomBody.result?.type === 'ENDED') {
                 leaveLiveKit(role);  // STT 중지 + LiveKit 퇴장 일괄 처리
               }
             });
-            log(role, '→ /api/v1/topic/room/' + body.roomId + ' 구독 완료');
-            await joinLiveKit(role, body.token, body.roomId);
 
-            client.subscribe('/topic/transcript/' + data.roomId, (tMsg) => {
+            client.subscribe('/api/v1/topic/transcript/' + data.roomId, (tMsg) => {
               const t = JSON.parse(tMsg.body);
               const speaker = t.speakerSessionId === sessionId ? role : (role === 'helper' ? 'helpee' : 'helper');
               appendTranscript(speaker, t.transcript, t.isFinal);
             });
 
-            log(role, '→ /topic/room/' + data.roomId + ' 구독 완료');
-            log(role, '→ /topic/transcript/' + data.roomId + ' 구독 완료');
+            log(role, '→ /api/v1/topic/room/' + data.roomId + ' 구독 완료');
+            log(role, '→ /api/v1/topic/transcript/' + data.roomId + ' 구독 완료');
 
             await joinLiveKit(role, data.token, data.roomId);  // 내부에서 STT 자동 시작
           }
