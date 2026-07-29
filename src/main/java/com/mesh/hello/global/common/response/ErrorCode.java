@@ -24,6 +24,10 @@ public enum ErrorCode {
     UNAUTHORIZED(401, "인증이 필요합니다."),
     DUPLICATE_USERNAME(409, "이미 사용 중인 사용자명입니다."),
 
+    // 카카오 OAuth
+    KAKAO_TOKEN_FAILED(502, "카카오 토큰 발급에 실패했습니다."),
+    KAKAO_USER_INFO_FAILED(502, "카카오 사용자 정보 조회에 실패했습니다."),
+
     INTERNAL_ERROR(500, "서버 내부 오류가 발생했습니다.");
 
     private final int code;
