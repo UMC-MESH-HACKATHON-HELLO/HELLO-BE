@@ -315,7 +315,7 @@
         const float32 = e.inputBuffer.getChannelData(0);
         const pcm = float32ToInt16(float32);
         client.publish({
-          destination: '/app/audio/stream',
+          destination: '/api/v1/audio/stream',
           body: JSON.stringify({ audio: uint8ArrayToBase64(pcm), roomId })
         });
       };
@@ -332,7 +332,7 @@
       sttState[role] = { active: true, audioCtx, processor, source, stream };
 
       client.publish({
-        destination: '/app/stt/start',
+        destination: '/api/v1/stt/start',
         body: JSON.stringify({ roomId, role })
       });
 
@@ -359,7 +359,7 @@
     delete sttState[role];
 
     if (stompClients[role]) {
-      stompClients[role].publish({ destination: '/app/stt/stop', body: '{}' });
+      stompClients[role].publish({ destination: '/api/v1/stt/stop', body: '{}' });
     }
 
     const btn = document.getElementById(role + 'SttBtn');
