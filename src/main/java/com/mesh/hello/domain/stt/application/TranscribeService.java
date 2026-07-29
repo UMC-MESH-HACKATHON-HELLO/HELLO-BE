@@ -4,7 +4,6 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mesh.hello.domain.stt.dto.RtzrTranscriptResponse;
 import com.mesh.hello.domain.stt.dto.TranscriptMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -12,6 +11,7 @@ import okhttp3.Response;
 import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -28,7 +28,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class TranscribeService {
 
     private static final String RTZR_STREAMING_URL = "wss://openapi.vito.ai/v1/transcribe:streaming"
@@ -42,6 +41,15 @@ public class TranscribeService {
     private final RtzrTokenProvider tokenProvider;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final SimpMessagingTemplate messagingTemplate;
+
+    public TranscribeService(
+            @Qualifier("rtzrStreamingHttpClient") OkHttpClient rtzrStreamingHttpClient,
+            RtzrTokenProvider tokenProvider,
+            SimpMessagingTemplate messagingTemplate) {
+        this.rtzrStreamingHttpClient = rtzrStreamingHttpClient;
+        this.tokenProvider = tokenProvider;
+        this.messagingTemplate = messagingTemplate;
+    }
 
     // sessionId → STT 세션
     private final ConcurrentHashMap<String, SttSession> sessions = new ConcurrentHashMap<>();

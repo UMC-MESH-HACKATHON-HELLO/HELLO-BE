@@ -8,6 +8,7 @@ import okhttp3.OkHttpClient;
 import okhttp3.Request;
 import okhttp3.RequestBody;
 import okhttp3.Response;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
@@ -32,7 +33,7 @@ public class RtzrTokenProvider {
     private volatile Instant expiresAt = Instant.EPOCH;
 
     public RtzrTokenProvider(
-            OkHttpClient rtzrAuthHttpClient,
+            @Qualifier("rtzrAuthHttpClient") OkHttpClient rtzrAuthHttpClient,
             @Value("${rtzr.client-id}") String clientId,
             @Value("${rtzr.client-secret}") String clientSecret) {
         this.rtzrAuthHttpClient = rtzrAuthHttpClient;
