@@ -48,7 +48,7 @@
     <button onclick="connect('helper')">1. STOMP 연결</button>
     <button onclick="registerHelper()">2. 대기 등록</button>
     <button onclick="toggleMic('helper')">마이크 ON/OFF</button>
-    <button id="helperSttBtn" onclick="toggleStt('helper')">STT 일시정지</button>
+    <button id="helperSttBtn" onclick="toggleStt('helper')">STT 시작</button>
     <button onclick="endCall('helper')">통화 종료</button>
     <button onclick="disconnect('helper')">STOMP 연결 종료</button>
     <div id="helperStatus" class="disconnected">● STOMP 미연결</div>
@@ -68,7 +68,7 @@
     <button onclick="connect('helpee')">1. STOMP 연결</button>
     <button onclick="requestMatch()">2. 도움 요청</button>
     <button onclick="toggleMic('helpee')">마이크 ON/OFF</button>
-    <button id="helpeeSttBtn" onclick="toggleStt('helpee')">STT 일시정지</button>
+    <button id="helpeeSttBtn" onclick="toggleStt('helpee')">STT 시작</button>
     <button onclick="endCall('helpee')">통화 종료</button>
     <button onclick="disconnect('helpee')">STOMP 연결 종료</button>
     <div id="helpeeStatus" class="disconnected">● STOMP 미연결</div>
@@ -363,7 +363,7 @@
     }
 
     const btn = document.getElementById(role + 'SttBtn');
-    btn.textContent = 'STT 일시정지';
+    btn.textContent = 'STT 시작';
     btn.className = '';
     setSttStatus(role, 'STT 비활성');
     log(role, '[STT] 자동 중지');
