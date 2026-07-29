@@ -320,8 +320,14 @@
         });
       };
 
+      // ScriptProcessorNode의 onaudioprocess 콜백이 계속 동작하려면 destination까지 연결이 이어져야 하지만,
+      // 마이크 소리를 그대로 재생하면 하울링이 생기므로 음소거 GainNode를 거쳐서 연결한다.
+      const silentGain = audioCtx.createGain();
+      silentGain.gain.value = 0;
+
       source.connect(processor);
-      processor.connect(audioCtx.destination);
+      processor.connect(silentGain);
+      silentGain.connect(audioCtx.destination);
 
       sttState[role] = { active: true, audioCtx, processor, source, stream };
 
