@@ -39,6 +39,8 @@ kakao:
   token-uri: https://kauth.kakao.com/oauth/token
   user-info-uri: https://kapi.kakao.com/v2/user/me
 
+frontend-url: ${FRONTEND_URL}
+
 aws:
   s3:
     bucket: ${S3_BUCKET}
