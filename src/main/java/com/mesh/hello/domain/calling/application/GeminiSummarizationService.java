@@ -47,6 +47,11 @@ public class GeminiSummarizationService {
                                    String helperSessionId, String transcript) {
         CallSummary pending = callSummaryRepository.findTopByRoomIdOrderByIdDesc(roomId).orElse(null);
 
+        if (pending == null) {
+            log.error("PENDING 요약 레코드를 찾을 수 없어 요약 처리를 중단합니다 (room: {})", roomId);
+            return;
+        }
+
         if (transcript == null || transcript.isBlank()) {
             log.info("요약 생략 — 텍스트 없음 (room: {})", roomId);
             persistenceService.completeSummary(pending, null, "통화 내용이 없어 요약을 생성하지 않았습니다.");
