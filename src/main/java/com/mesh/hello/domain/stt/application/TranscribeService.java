@@ -96,7 +96,7 @@ public class TranscribeService {
         try {
             result = objectMapper.readValue(json, RtzrTranscriptResponse.class);
         } catch (JsonProcessingException e) {
-            log.warn("STT 응답 파싱 실패: {} ({})", sessionId, json, e);
+            log.warn("STT 응답 파싱 실패: {}", sessionId, e);
             return;
         }
 
