@@ -29,6 +29,7 @@ public class GeminiSummarizationService {
 
     private final RestClient geminiRestClient;
     private final CallSummaryRepository callSummaryRepository;
+    private final CallSummaryPersistenceService persistenceService;
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -42,58 +43,57 @@ public class GeminiSummarizationService {
     }
 
     @Async
-    @Transactional
     public void summarizeAndNotify(String roomId, String helpeeSessionId,
                                    String helperSessionId, String transcript) {
         CallSummary pending = callSummaryRepository.findTopByRoomIdOrderByIdDesc(roomId).orElse(null);
 
         if (transcript == null || transcript.isBlank()) {
             log.info("요약 생략 — 텍스트 없음 (room: {})", roomId);
-            if (pending != null) {
-                pending.complete(null, "통화 내용이 없어 요약을 생성하지 않았습니다.");
-            }
+            persistenceService.completeSummary(pending, null, "통화 내용이 없어 요약을 생성하지 않았습니다.");
             return;
         }
+
+        String requestedHelp;
+        String providedHelp;
+        String result;
+        String summaryText;
 
         try {
             JsonNode summary = callGemini(transcript);
 
-            String requestedHelp = summary.path("requestedHelp").asText();
-            String providedHelp  = summary.path("providedHelp").asText();
-            String result        = summary.path("result").asText();
-            String summaryText   = "요청: %s\n제공된 도움: %s\n결과: %s"
+            requestedHelp = summary.path("requestedHelp").asText();
+            providedHelp  = summary.path("providedHelp").asText();
+            result        = summary.path("result").asText();
+            summaryText   = "요청: %s\n제공된 도움: %s\n결과: %s"
                     .formatted(requestedHelp, providedHelp, result);
-
-            if (pending != null) {
-                pending.complete(transcript, summaryText);
-            }
-
-            // 도우미: 전체 요약
-            messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/api/v1/queue/signal",
-                    ApiResponse.ok("통화 요약이 완료되었습니다.",
-                            Map.of("type", "CALL_SUMMARY",
-                                    "requestedHelp", requestedHelp,
-                                    "providedHelp", providedHelp,
-                                    "result", result))
-            );
-
-            // 어르신: 도우미가 제공한 도움만
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
-                    ApiResponse.ok("통화 요약이 완료되었습니다.",
-                            Map.of("type", "CALL_SUMMARY",
-                                    "providedHelp", providedHelp))
-            );
-
-            log.info("통화 요약 완료 (room: {})", roomId);
 
         } catch (Exception e) {
             log.error("통화 요약 실패 (room: {})", roomId, e);
-            if (pending != null) {
-                pending.complete(transcript, "AI 요약 생성에 실패했습니다.");
-            }
+            persistenceService.completeSummary(pending, transcript, "AI 요약 생성에 실패했습니다.");
+            return;
         }
+
+        persistenceService.completeSummary(pending, transcript, summaryText);
+
+        // 도우미: 전체 요약
+        messagingTemplate.convertAndSendToUser(
+                helperSessionId, "/api/v1/queue/signal",
+                ApiResponse.ok("통화 요약이 완료되었습니다.",
+                        Map.of("type", "CALL_SUMMARY",
+                                "requestedHelp", requestedHelp,
+                                "providedHelp", providedHelp,
+                                "result", result))
+        );
+
+        // 어르신: 도우미가 제공한 도움만
+        messagingTemplate.convertAndSendToUser(
+                helpeeSessionId, "/api/v1/queue/signal",
+                ApiResponse.ok("통화 요약이 완료되었습니다.",
+                        Map.of("type", "CALL_SUMMARY",
+                                "providedHelp", providedHelp))
+        );
+
+        log.info("통화 요약 완료 (room: {})", roomId);
     }
 
     @Transactional(readOnly = true)
