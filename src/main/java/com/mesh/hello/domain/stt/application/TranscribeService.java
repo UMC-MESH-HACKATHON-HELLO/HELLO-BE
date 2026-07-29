@@ -15,10 +15,15 @@ import okio.ByteString;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Queue;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -29,6 +34,9 @@ public class TranscribeService {
     private static final String RTZR_STREAMING_URL = "wss://openapi.vito.ai/v1/transcribe:streaming"
             + "?sample_rate=16000&encoding=LINEAR16"
             + "&use_itn=true&use_disfluency_filter=true&use_profanity_filter=false";
+
+    // EOS 전송 후 RTZR의 마지막 인식 결과(onClosed)를 기다리는 최대 시간
+    private static final long FLUSH_TIMEOUT_SECONDS = 3;
 
     private final OkHttpClient rtzrStreamingHttpClient;
     private final RtzrTokenProvider tokenProvider;
@@ -46,7 +54,7 @@ public class TranscribeService {
 
     public void startSession(String sessionId, String roomId, String role) {
         // 소켓을 열기 전에 자리를 먼저 원자적으로 예약해서 동시 시작을 막는다.
-        SttSession reserved = new SttSession(roomId, null);
+        SttSession reserved = new SttSession(roomId, null, null);
         if (sessions.putIfAbsent(sessionId, reserved) != null) {
             log.warn("STT 세션 이미 존재: {}", sessionId);
             return;
@@ -61,6 +69,7 @@ public class TranscribeService {
                 .build();
 
         AtomicReference<SttSession> sessionRef = new AtomicReference<>(reserved);
+        CompletableFuture<Void> completed = new CompletableFuture<>();
 
         WebSocket webSocket = rtzrStreamingHttpClient.newWebSocket(request, new WebSocketListener() {
             @Override
@@ -78,15 +87,17 @@ public class TranscribeService {
                 log.error("STT 오류: {} (status={})", sessionId, response != null ? response.code() : null, t);
                 // 그 사이 다른 세션으로 교체됐다면 지우지 않는다 (조건부 제거).
                 sessions.remove(sessionId, sessionRef.get());
+                completed.complete(null);
             }
 
             @Override
             public void onClosed(WebSocket webSocket, int code, String reason) {
                 log.info("STT 완료: {} (code={}, reason={})", sessionId, code, reason);
+                completed.complete(null);
             }
         });
 
-        SttSession session = new SttSession(roomId, webSocket);
+        SttSession session = new SttSession(roomId, webSocket, completed);
         sessionRef.set(session);
         sessions.put(sessionId, session);
 
@@ -126,20 +137,34 @@ public class TranscribeService {
         session.webSocket().send(ByteString.of(pcmData));
     }
 
-    public void stopSession(String sessionId) {
+    public CompletableFuture<Void> stopSession(String sessionId) {
         SttSession session = sessions.remove(sessionId);
-        if (session == null || session.webSocket() == null) return;
+        if (session == null || session.webSocket() == null) return CompletableFuture.completedFuture(null);
         session.webSocket().send("EOS");
         log.info("STT 세션 종료 요청: {}", sessionId);
+        return session.completed();
     }
 
-    /** 방에 속한 모든 STT 세션을 종료하고 누적 텍스트를 반환한다. */
+    /** 방에 속한 모든 STT 세션을 종료하고, RTZR이 마지막 인식 결과를 보낼 때까지 잠시 기다린 뒤 누적 텍스트를 반환한다. */
     public String flushTranscript(String roomId) {
-        sessions.entrySet().stream()
+        List<CompletableFuture<Void>> completions = sessions.entrySet().stream()
                 .filter(e -> roomId.equals(e.getValue().roomId()))
                 .map(Map.Entry::getKey)
                 .toList()
-                .forEach(this::stopSession);
+                .stream()
+                .map(this::stopSession)
+                .toList();
+
+        try {
+            CompletableFuture.allOf(completions.toArray(new CompletableFuture[0]))
+                    .get(FLUSH_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException e) {
+            log.warn("STT 세션 종료 대기 타임아웃 (room: {})", roomId);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            log.warn("STT 세션 종료 대기 중 오류 (room: {})", roomId, e);
+        }
 
         roomRoles.remove(roomId);
 
@@ -147,6 +172,6 @@ public class TranscribeService {
         return lines != null ? String.join("\n", lines) : "";
     }
 
-    private record SttSession(String roomId, WebSocket webSocket) {
+    private record SttSession(String roomId, WebSocket webSocket, CompletableFuture<Void> completed) {
     }
 }
