@@ -57,7 +57,14 @@ public class CallSummary {
         this.createdAt = LocalDateTime.now();
     }
 
+    /** AI 요약 생성에 실패하면 원문만 남기고 FAILED로 전환한다. 재시도/재조회가 가능하도록 성공과 구분한다. */
+    public void fail(String transcript) {
+        this.transcript = transcript;
+        this.status = SummaryStatus.FAILED;
+        this.createdAt = LocalDateTime.now();
+    }
+
     public enum SummaryStatus {
-        PENDING, COMPLETED
+        PENDING, COMPLETED, FAILED
     }
 }

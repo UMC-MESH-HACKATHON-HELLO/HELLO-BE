@@ -19,6 +19,7 @@ public enum ErrorCode {
     ALREADY_IN_CALL(409, "이미 통화 중입니다."),
     NOT_FOUND(404, "대상 룸 또는 요청을 찾을 수 없습니다."),
     SUMMARY_PENDING(202, "요약을 생성하고 있습니다."),
+    SUMMARY_FAILED(500, "AI 요약 생성에 실패했습니다."),
 
     // 인증/로그인
     LOGIN_FAILED(401, "아이디 또는 비밀번호가 일치하지 않습니다."),

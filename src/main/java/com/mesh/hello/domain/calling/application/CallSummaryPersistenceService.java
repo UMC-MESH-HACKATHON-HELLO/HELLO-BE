@@ -19,4 +19,12 @@ public class CallSummaryPersistenceService {
             callSummaryRepository.save(pending);
         }
     }
+
+    @Transactional
+    public void failSummary(CallSummary pending, String transcript) {
+        if (pending != null) {
+            pending.fail(transcript);
+            callSummaryRepository.save(pending);
+        }
+    }
 }

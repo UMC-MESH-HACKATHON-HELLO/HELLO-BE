@@ -69,7 +69,7 @@ public class GeminiSummarizationService {
 
         } catch (Exception e) {
             log.error("통화 요약 실패 (room: {})", roomId, e);
-            persistenceService.completeSummary(pending, transcript, "AI 요약 생성에 실패했습니다.");
+            persistenceService.failSummary(pending, transcript);
             return;
         }
 
@@ -103,6 +103,9 @@ public class GeminiSummarizationService {
 
         if (summary.getStatus() == CallSummary.SummaryStatus.PENDING) {
             throw new BusinessException(ErrorCode.SUMMARY_PENDING);
+        }
+        if (summary.getStatus() == CallSummary.SummaryStatus.FAILED) {
+            throw new BusinessException(ErrorCode.SUMMARY_FAILED);
         }
 
         return CallSummaryResponse.from(summary);
