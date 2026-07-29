@@ -17,6 +17,7 @@ import org.springframework.stereotype.Service;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
 @Service
@@ -42,7 +43,9 @@ public class TranscribeService {
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, String>> roomRoles = new ConcurrentHashMap<>();
 
     public void startSession(String sessionId, String roomId, String role) {
-        if (sessions.containsKey(sessionId)) {
+        // 소켓을 열기 전에 자리를 먼저 원자적으로 예약해서 동시 시작을 막는다.
+        SttSession reserved = new SttSession(roomId, null);
+        if (sessions.putIfAbsent(sessionId, reserved) != null) {
             log.warn("STT 세션 이미 존재: {}", sessionId);
             return;
         }
@@ -54,6 +57,8 @@ public class TranscribeService {
                 .url(RTZR_STREAMING_URL)
                 .header("Authorization", "Bearer " + tokenProvider.getAccessToken())
                 .build();
+
+        AtomicReference<SttSession> sessionRef = new AtomicReference<>(reserved);
 
         WebSocket webSocket = rtzrStreamingHttpClient.newWebSocket(request, new WebSocketListener() {
             @Override
@@ -69,7 +74,8 @@ public class TranscribeService {
             @Override
             public void onFailure(WebSocket webSocket, Throwable t, Response response) {
                 log.error("STT 오류: {} (status={})", sessionId, response != null ? response.code() : null, t);
-                sessions.remove(sessionId);
+                // 그 사이 다른 세션으로 교체됐다면 지우지 않는다 (조건부 제거).
+                sessions.remove(sessionId, sessionRef.get());
             }
 
             @Override
@@ -78,7 +84,9 @@ public class TranscribeService {
             }
         });
 
-        sessions.put(sessionId, new SttSession(roomId, webSocket));
+        SttSession session = new SttSession(roomId, webSocket);
+        sessionRef.set(session);
+        sessions.put(sessionId, session);
 
         log.info("STT 세션 시작: {} (room: {}, role: {})", sessionId, roomId, role);
     }
@@ -113,13 +121,13 @@ public class TranscribeService {
 
     public void sendAudio(String sessionId, byte[] pcmData) {
         SttSession session = sessions.get(sessionId);
-        if (session == null) return;
+        if (session == null || session.webSocket() == null) return;
         session.webSocket().send(ByteString.of(pcmData));
     }
 
     public void stopSession(String sessionId) {
         SttSession session = sessions.remove(sessionId);
-        if (session == null) return;
+        if (session == null || session.webSocket() == null) return;
         session.webSocket().send("EOS");
         log.info("STT 세션 종료 요청: {}", sessionId);
     }
