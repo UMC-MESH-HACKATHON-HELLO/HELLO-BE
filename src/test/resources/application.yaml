@@ -1,0 +1,14 @@
+spring:
+  # 테스트도 H2 대신 로컬 MySQL에 연결한다.
+  # 기본은 메인과 동일한 DB_* env를 사용하고, 테스트 전용 DB를 쓰고 싶으면 TEST_DB_* env로 분리 지정한다.
+  datasource:
+    url: ${TEST_DB_URL:${DB_URL}}
+    username: ${TEST_DB_USER:${DB_USER}}
+    password: ${TEST_DB_PW:${DB_PW}}
+    driver-class-name: com.mysql.cj.jdbc.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.MySQLDialect
+    hibernate:
+      ddl-auto: update
+    show-sql: false
