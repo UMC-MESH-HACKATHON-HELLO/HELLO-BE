@@ -38,7 +38,10 @@ public class CallSummary {
     @Column(nullable = false)
     private SummaryStatus status;
 
+    @Column(nullable = false)
     private LocalDateTime createdAt;
+
+    private LocalDateTime completedAt;
 
     /** 통화 종료 직후, AI 요약이 완성되기 전 PENDING 상태로 먼저 저장한다. */
     public CallSummary(String roomId, String helpeeSessionId, String helperSessionId, int durationSec) {
@@ -47,6 +50,7 @@ public class CallSummary {
         this.helperSessionId = helperSessionId;
         this.durationSec = durationSec;
         this.status = SummaryStatus.PENDING;
+        this.createdAt = LocalDateTime.now();
     }
 
     /** AI 요약이 완성되면 원문·요약 텍스트를 채우고 COMPLETED로 전환한다. */
@@ -54,14 +58,14 @@ public class CallSummary {
         this.transcript = transcript;
         this.summary = summary;
         this.status = SummaryStatus.COMPLETED;
-        this.createdAt = LocalDateTime.now();
+        this.completedAt = LocalDateTime.now();
     }
 
     /** AI 요약 생성에 실패하면 원문만 남기고 FAILED로 전환한다. 재시도/재조회가 가능하도록 성공과 구분한다. */
     public void fail(String transcript) {
         this.transcript = transcript;
         this.status = SummaryStatus.FAILED;
-        this.createdAt = LocalDateTime.now();
+        this.completedAt = LocalDateTime.now();
     }
 
     public enum SummaryStatus {

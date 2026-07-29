@@ -8,7 +8,7 @@ public record CallSummaryResponse(
         String roomId,
         String summary,
         int durationSec,
-        LocalDateTime createdAt
+        LocalDateTime completedAt
 ) {
 
     public static CallSummaryResponse from(CallSummary summary) {
@@ -16,7 +16,7 @@ public record CallSummaryResponse(
                 summary.getRoomId(),
                 summary.getSummary(),
                 summary.getDurationSec(),
-                summary.getCreatedAt()
+                summary.getCompletedAt()
         );
     }
 }
