@@ -25,6 +25,7 @@ public enum ErrorCode {
     DUPLICATE_USERNAME(409, "이미 사용 중인 사용자명입니다."),
 
     // 카카오 OAuth
+    OAUTH_STATE_MISMATCH(401, "OAuth state 값이 유효하지 않습니다."),
     KAKAO_TOKEN_FAILED(502, "카카오 토큰 발급에 실패했습니다."),
     KAKAO_USER_INFO_FAILED(502, "카카오 사용자 정보 조회에 실패했습니다."),
 

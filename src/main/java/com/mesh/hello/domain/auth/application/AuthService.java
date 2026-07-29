@@ -105,7 +105,9 @@ public class AuthService {
      *   <li>현재 요청에서 익명 sessionId를 추출해 userId에 바인딩한다.</li>
      * </ol>
      *
-     * <p>카카오 로그인 서비스는 User 객체를 확보한 뒤 이 메서드를 직접 호출하면 된다.</p>
+     * <p>익명 sessionId를 현재 요청에서 뽑을 수 없는 흐름(예: 카카오 콜백)은
+     * {@link #createSession(User, HttpServletRequest, HttpServletResponse, String)}으로
+     * sessionId를 직접 넘긴다.</p>
      *
      * @param user         세션을 발급할 도우미 계정
      * @param httpRequest  현재 HTTP 요청 (익명 sessionId 추출 + 세션 저장에 사용)
@@ -114,6 +116,22 @@ public class AuthService {
     public void createSession(User user,
                               HttpServletRequest httpRequest,
                               HttpServletResponse httpResponse) {
+        createSession(user, httpRequest, httpResponse, null);
+    }
+
+    /**
+     * 세션 발급 공통 로직. 익명 sessionId를 호출 측에서 명시적으로 지정하는 오버로드.
+     *
+     * <p>카카오 콜백은 카카오 인가 서버가 보낸 요청이므로 {@code sessionId} 헤더가 없다.
+     * 로그인 진입 시점에 HttpSession에 보관해둔 익명 sessionId를 꺼내 이 파라미터로 넘긴다.</p>
+     *
+     * @param anonymousSessionId 바인딩할 익명 세션 ID.
+     *                           null/공백이면 현재 요청(헤더 → HttpSession 속성)에서 추출을 시도한다.
+     */
+    public void createSession(User user,
+                              HttpServletRequest httpRequest,
+                              HttpServletResponse httpResponse,
+                              String anonymousSessionId) {
         List<GrantedAuthority> authorities = resolveAuthorities(user);
 
         UsernamePasswordAuthenticationToken authToken =
@@ -127,8 +145,12 @@ public class AuthService {
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
 
         // 익명 sessionId ↔ userId 바인딩 (매칭·포인트가 sessionId로 계정 resolve 가능하도록)
-        resolveAnonymousSessionId(httpRequest)
-                .ifPresent(sessionId -> sessionAccountRepository.bind(sessionId, user.getId()));
+        // 명시적으로 넘어온 값이 없으면 현재 요청에서 추출한다(기존 일반 로그인 동작).
+        Optional<String> sessionIdToBind = (anonymousSessionId != null && !anonymousSessionId.isBlank())
+                ? Optional.of(anonymousSessionId)
+                : resolveAnonymousSessionId(httpRequest);
+
+        sessionIdToBind.ifPresent(sessionId -> sessionAccountRepository.bind(sessionId, user.getId()));
     }
 
     /**
@@ -145,8 +167,11 @@ public class AuthService {
      * 현재 요청에서 익명 sessionId를 추출한다.
      *
      * <p>우선순위: 요청 헤더 {@code sessionId} → HttpSession 속성 {@code sessionId}.</p>
+     *
+     * <p>카카오 로그인 진입 컨트롤러도 이 로직으로 익명 sessionId를 읽어
+     * 콜백까지 왕복시키므로 public이다.</p>
      */
-    private Optional<String> resolveAnonymousSessionId(HttpServletRequest request) {
+    public Optional<String> resolveAnonymousSessionId(HttpServletRequest request) {
         String fromHeader = request.getHeader(SESSION_ID_KEY);
         if (fromHeader != null && !fromHeader.isBlank()) {
             return Optional.of(fromHeader);
