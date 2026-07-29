@@ -32,6 +32,11 @@ public class AudioStreamingController {
             return;
         }
 
+        if (room.isClosing()) {
+            log.warn("STT 시작 거부 — 종료 중인 방: {} (room: {})", sessionId, room.getRoomId());
+            return;
+        }
+
         transcribeService.startSession(sessionId, room.getRoomId(), room.roleOf(sessionId));
     }
 

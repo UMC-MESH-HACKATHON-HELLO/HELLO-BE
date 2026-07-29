@@ -123,6 +123,7 @@ public class MatchingService {
      */
     public void endCall(String sessionId, String roomId) {
         matchingRoomRepository.findByRoomId(roomId).ifPresent(room -> {
+            room.markClosing();
             String transcript = transcribeService.flushTranscript(roomId);
             int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
             geminiSummarizationService.markPending(
@@ -147,6 +148,7 @@ public class MatchingService {
         matchingQueueRepository.removeHelpee(sessionId);
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
+            room.markClosing();
             String transcript = transcribeService.flushTranscript(room.getRoomId());
             int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
             geminiSummarizationService.markPending(

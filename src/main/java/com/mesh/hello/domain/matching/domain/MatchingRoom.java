@@ -4,6 +4,7 @@ import lombok.Getter;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 매칭 결과 상태(통화방).
@@ -19,11 +20,23 @@ public class MatchingRoom {
     private final String helperSessionId;
     private final LocalDateTime matchedAt;
 
+    // 통화 종료(플러시) 절차가 시작됐는지 여부. true가 된 이후로는 새 STT 세션 시작을 거부한다.
+    private final AtomicBoolean closing = new AtomicBoolean(false);
+
     public MatchingRoom(String roomId, String helpeeSessionId, String helperSessionId) {
         this.roomId = roomId;
         this.helpeeSessionId = helpeeSessionId;
         this.helperSessionId = helperSessionId;
         this.matchedAt = LocalDateTime.now();
+    }
+
+    /** 종료 절차 시작을 표시한다. 이미 표시돼 있었다면 false. */
+    public boolean markClosing() {
+        return closing.compareAndSet(false, true);
+    }
+
+    public boolean isClosing() {
+        return closing.get();
     }
 
     /** 해당 sessionId가 이 방의 참가자인지 여부. */
