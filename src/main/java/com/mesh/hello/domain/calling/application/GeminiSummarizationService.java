@@ -81,8 +81,8 @@ public class GeminiSummarizationService {
         persistenceService.completeSummary(pending, transcript, summaryText);
 
         // 도우미: 전체 요약
-        messagingTemplate.convertAndSendToUser(
-                helperSessionId, "/api/v1/queue/signal",
+        messagingTemplate.convertAndSend(
+                "/api/v1/queue/signal/" + helperSessionId,
                 ApiResponse.ok("통화 요약이 완료되었습니다.",
                         Map.of("type", "CALL_SUMMARY",
                                 "requestedHelp", requestedHelp,
@@ -91,8 +91,8 @@ public class GeminiSummarizationService {
         );
 
         // 어르신: 도우미가 제공한 도움만
-        messagingTemplate.convertAndSendToUser(
-                helpeeSessionId, "/api/v1/queue/signal",
+        messagingTemplate.convertAndSend(
+                "/api/v1/queue/signal/" + helpeeSessionId,
                 ApiResponse.ok("통화 요약이 완료되었습니다.",
                         Map.of("type", "CALL_SUMMARY",
                                 "providedHelp", providedHelp))

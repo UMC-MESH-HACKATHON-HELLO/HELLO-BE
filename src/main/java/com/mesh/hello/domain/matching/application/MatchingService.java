@@ -37,8 +37,8 @@ public class MatchingService {
 
         if (helperOpt.isEmpty()) {
             matchingQueueRepository.pushHelpee(helpeeSessionId);
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
             );
             return;
@@ -54,13 +54,13 @@ public class MatchingService {
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
 
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken))
             );
-            messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helperSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken))
             );
@@ -68,8 +68,8 @@ public class MatchingService {
         } catch (Exception e) {
             // 토큰 발급 실패 시 도우미 다시 큐에 넣고 helpee에게 실패 알림
             matchingQueueRepository.pushHelper(helperSessionId);
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
             );
         }
@@ -84,8 +84,8 @@ public class MatchingService {
 
         if (helpeeOpt.isEmpty()) {
             matchingQueueRepository.pushHelper(helperSessionId);
-            messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helperSessionId,
                     ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
             );
             return;
@@ -101,13 +101,13 @@ public class MatchingService {
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
 
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken))
             );
-            messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helperSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken))
             );
@@ -157,8 +157,8 @@ public class MatchingService {
                     room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
 
             room.counterpartOf(sessionId).ifPresent(counterpart ->
-                    messagingTemplate.convertAndSendToUser(
-                            counterpart, "/api/v1/queue/signal",
+                    messagingTemplate.convertAndSend(
+                            "/api/v1/queue/signal/" + counterpart,
                             ApiResponse.ok("상대방의 연결이 종료되었습니다.", Map.of("type", "PARTNER_DISCONNECTED"))
                     )
             );
