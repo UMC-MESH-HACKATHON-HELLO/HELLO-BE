@@ -16,7 +16,9 @@ import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicReference;
 
 @Slf4j
@@ -36,8 +38,8 @@ public class TranscribeService {
     // sessionId → STT 세션
     private final ConcurrentHashMap<String, SttSession> sessions = new ConcurrentHashMap<>();
 
-    // roomId → 전체 원문 누적 (화자 구분 포함)
-    private final ConcurrentHashMap<String, StringBuilder> transcripts = new ConcurrentHashMap<>();
+    // roomId → 발화 단위 원문 누적 (화자 구분 포함). helpee/helper 세션이 동시에 append할 수 있어 락 없는 동시성 안전 큐를 사용한다.
+    private final ConcurrentHashMap<String, Queue<String>> transcripts = new ConcurrentHashMap<>();
 
     // roomId → {sessionId → 역할("helpee"/"helper")}
     private final ConcurrentHashMap<String, ConcurrentHashMap<String, String>> roomRoles = new ConcurrentHashMap<>();
@@ -50,7 +52,7 @@ public class TranscribeService {
             return;
         }
 
-        transcripts.putIfAbsent(roomId, new StringBuilder());
+        transcripts.putIfAbsent(roomId, new ConcurrentLinkedQueue<>());
         roomRoles.computeIfAbsent(roomId, k -> new ConcurrentHashMap<>()).put(sessionId, role);
 
         Request request = new Request.Builder()
@@ -108,10 +110,9 @@ public class TranscribeService {
         if (isFinal) {
             String speakerRole = roomRoles.getOrDefault(roomId, new ConcurrentHashMap<>())
                     .getOrDefault(sessionId, "unknown");
-            StringBuilder transcript = transcripts.get(roomId);
+            Queue<String> transcript = transcripts.get(roomId);
             if (transcript != null) {
-                transcript.append("[").append(speakerRole).append("] ")
-                        .append(text).append("\n");
+                transcript.add("[" + speakerRole + "] " + text);
             }
         }
 
@@ -142,8 +143,8 @@ public class TranscribeService {
 
         roomRoles.remove(roomId);
 
-        StringBuilder sb = transcripts.remove(roomId);
-        return sb != null ? sb.toString().trim() : "";
+        Queue<String> lines = transcripts.remove(roomId);
+        return lines != null ? String.join("\n", lines) : "";
     }
 
     private record SttSession(String roomId, WebSocket webSocket) {
