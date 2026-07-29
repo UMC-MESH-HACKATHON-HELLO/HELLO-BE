@@ -25,7 +25,7 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class GeminiSummarizationService {
 
-    private static final String MODEL_ID = "gemini-2.5-flash-lite";
+    private static final String MODEL_ID = "gemini-flash-lite-latest";
 
     private final RestClient geminiRestClient;
     private final CallSummaryRepository callSummaryRepository;
