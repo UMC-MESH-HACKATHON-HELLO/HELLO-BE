@@ -41,4 +41,15 @@ public class MatchingRoom {
         }
         return Optional.empty();
     }
+
+    /** 주어진 sessionId의 역할("helpee"/"helper"). 참가자가 아니면 null. */
+    public String roleOf(String sessionId) {
+        if (helpeeSessionId.equals(sessionId)) {
+            return "helpee";
+        }
+        if (helperSessionId.equals(sessionId)) {
+            return "helper";
+        }
+        return null;
+    }
 }
