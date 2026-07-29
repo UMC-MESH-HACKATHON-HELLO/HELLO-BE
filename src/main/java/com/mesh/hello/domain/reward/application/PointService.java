@@ -8,16 +8,19 @@ import com.mesh.hello.domain.user.domain.User;
 import com.mesh.hello.domain.user.repository.UserRepository;
 import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ErrorCode;
-import java.util.Comparator;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
  * 도우미 포인트 적립/조회.
  *
- * <p>적립 내역({@code PointHistory})은 인메모리로 보관하고, {@code User.points}는
+ * <p>적립 내역({@code PointHistory})은 DB에 보관하고, {@code User.points}는
  * 로그인 응답 등에서 바로 참조할 수 있는 캐시 값으로 함께 갱신한다.</p>
  */
 @Service
@@ -34,7 +37,7 @@ public class PointService {
     /** 통화 정상 종료 시 도우미에게 포인트를 적립한다. */
     @Transactional
     public void awardCallCompletePoints(Long helperId, String roomId) {
-        pointHistoryRepository.save(helperId, CALL_COMPLETE_POINTS, CALL_COMPLETE_REASON, roomId);
+        pointHistoryRepository.save(new PointHistory(helperId, CALL_COMPLETE_POINTS, CALL_COMPLETE_REASON, roomId));
         userRepository.findById(helperId).ifPresent(user -> user.addPoints(CALL_COMPLETE_POINTS));
     }
 
@@ -47,15 +50,11 @@ public class PointService {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
 
-        List<PointHistory> histories = pointHistoryRepository.findAllByUserId(user.getId()).stream()
-                .sorted(Comparator.comparing(PointHistory::getCreatedAt).reversed())
-                .toList();
-
-        long totalPoints = histories.stream().mapToLong(PointHistory::getAmount).sum();
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<PointHistory> histories = pointHistoryRepository.findAllByUserId(user.getId(), pageable);
+        long totalPoints = pointHistoryRepository.sumAmountByUserId(user.getId());
 
         List<PointHistoryItem> pageItems = histories.stream()
-                .skip((long) page * size)
-                .limit(size)
                 .map(PointHistoryItem::from)
                 .toList();
 

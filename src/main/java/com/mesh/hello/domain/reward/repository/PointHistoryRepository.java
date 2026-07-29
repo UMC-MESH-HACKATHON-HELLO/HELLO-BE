@@ -1,11 +1,16 @@
 package com.mesh.hello.domain.reward.repository;
 
 import com.mesh.hello.domain.reward.domain.PointHistory;
-import java.util.List;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
-public interface PointHistoryRepository {
+public interface PointHistoryRepository extends JpaRepository<PointHistory, Long> {
 
-    PointHistory save(Long userId, long amount, String reason, String roomId);
+    Page<PointHistory> findAllByUserId(Long userId, Pageable pageable);
 
-    List<PointHistory> findAllByUserId(Long userId);
+    @Query("SELECT COALESCE(SUM(p.amount), 0) FROM PointHistory p WHERE p.userId = :userId")
+    long sumAmountByUserId(@Param("userId") Long userId);
 }

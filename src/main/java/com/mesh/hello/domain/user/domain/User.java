@@ -38,7 +38,7 @@ public class User {
     @Column
     private String nickname;
 
-    /** 보유 포인트 총합. 실제 적립/차감 내역은 {@code PointHistory}(인메모리)로 관리한다. */
+    /** 보유 포인트 총합. 실제 적립/차감 내역은 {@code PointHistory}(DB)로 관리한다. */
     @Column(nullable = false)
     private long points = 0L;
 
