@@ -20,6 +20,6 @@ public interface MatchingRoomRepository {
     /** 참가자 sessionId로 그가 속한 방을 찾는다. */
     Optional<MatchingRoom> findBySessionId(String sessionId);
 
-    /** 방과 그 참가자 인덱스를 모두 제거한다. */
-    void deleteByRoomId(String roomId);
+    /** 방과 그 참가자 인덱스를 모두 제거하고, 제거된 방을 반환한다(이미 제거됐다면 empty). */
+    Optional<MatchingRoom> deleteByRoomId(String roomId);
 }

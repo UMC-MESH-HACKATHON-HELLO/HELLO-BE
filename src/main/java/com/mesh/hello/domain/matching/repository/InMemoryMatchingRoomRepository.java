@@ -38,11 +38,12 @@ public class InMemoryMatchingRoomRepository implements MatchingRoomRepository {
     }
 
     @Override
-    public void deleteByRoomId(String roomId) {
+    public Optional<MatchingRoom> deleteByRoomId(String roomId) {
         MatchingRoom room = roomsById.remove(roomId);
         if (room != null) {
             roomIdBySession.remove(room.getHelpeeSessionId());
             roomIdBySession.remove(room.getHelperSessionId());
         }
+        return Optional.ofNullable(room);
     }
 }

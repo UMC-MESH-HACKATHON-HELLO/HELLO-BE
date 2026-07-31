@@ -30,20 +30,29 @@ public class PointService {
     /** 통화 1건 정상 종료 시 도우미에게 적립되는 포인트. */
     private static final long CALL_COMPLETE_POINTS = 10L;
     private static final String CALL_COMPLETE_REASON = "도움 통화 완료";
+    private static final int MAX_PAGE_SIZE = 100;
 
     private final PointHistoryRepository pointHistoryRepository;
     private final UserRepository userRepository;
 
-    /** 통화 정상 종료 시 도우미에게 포인트를 적립한다. */
+    /**
+     * 통화 정상 종료 시 도우미에게 포인트를 적립한다.
+     *
+     * <p>{@code User.points}는 find-and-save 대신 원자적 UPDATE로 갱신해, 동시에 여러
+     * 통화가 종료돼도 갱신 유실 없이 반영되도록 한다. 대상 유저가 없으면 내역도 남기지 않는다.</p>
+     */
     @Transactional
     public void awardCallCompletePoints(Long helperId, String roomId) {
+        int updated = userRepository.addPoints(helperId, CALL_COMPLETE_POINTS);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
         pointHistoryRepository.save(new PointHistory(helperId, CALL_COMPLETE_POINTS, CALL_COMPLETE_REASON, roomId));
-        userRepository.findById(helperId).ifPresent(user -> user.addPoints(CALL_COMPLETE_POINTS));
     }
 
     @Transactional(readOnly = true)
     public PointHistoryResponse getPointHistory(String username, int page, int size) {
-        if (page < 0 || size <= 0) {
+        if (page < 0 || size <= 0 || size > MAX_PAGE_SIZE) {
             throw new BusinessException(ErrorCode.INVALID_PAGING);
         }
 

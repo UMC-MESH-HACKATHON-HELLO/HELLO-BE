@@ -50,9 +50,4 @@ public class User {
         this.points = 0L;
     }
 
-    /** 포인트를 적립(양수)하거나 차감(음수)한다. */
-    public void addPoints(long amount) {
-        this.points += amount;
-    }
-
 }

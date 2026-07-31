@@ -5,7 +5,9 @@ import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.reward.application.PointService;
+import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ApiResponse;
+import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -119,18 +121,31 @@ public class MatchingService {
     /**
      * 통화를 정상 종료한다. 방에 있는 양측 모두에게 ENDED를 전송하고 방을 삭제한다.
      * 로그인된 도우미였다면 통화 완료 포인트를 적립한다.
+     *
+     * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있으므로, 방 제거는
+     * {@link MatchingRoomRepository#deleteByRoomId}의 원자적 제거 결과로 판단해
+     * 둘 중 먼저 제거에 성공한 호출만 포인트 적립과 ENDED 브로드캐스트를 수행한다.</p>
      */
     public void endCall(String sessionId, String roomId) {
-        matchingRoomRepository.findByRoomId(roomId).ifPresent(room ->
-                sessionAccountRepository.findUserId(room.getHelperSessionId())
-                        .ifPresent(helperId -> pointService.awardCallCompletePoints(helperId, roomId))
-        );
+        MatchingRoom room = matchingRoomRepository.findByRoomId(roomId).orElse(null);
+        if (room == null) {
+            return;
+        }
+        if (!room.contains(sessionId)) {
+            throw new BusinessException(ErrorCode.ROLE_NOT_ALLOWED);
+        }
+
+        if (matchingRoomRepository.deleteByRoomId(roomId).isEmpty()) {
+            return;
+        }
+
+        sessionAccountRepository.findUserId(room.getHelperSessionId())
+                .ifPresent(helperId -> pointService.awardCallCompletePoints(helperId, roomId));
 
         messagingTemplate.convertAndSend(
                 "/api/v1/topic/room/" + roomId,
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
         );
-        matchingRoomRepository.deleteByRoomId(roomId);
     }
 
     /**
