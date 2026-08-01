@@ -23,6 +23,9 @@ public enum ErrorCode {
     LOGIN_FAILED(401, "아이디 또는 비밀번호가 일치하지 않습니다."),
     UNAUTHORIZED(401, "인증이 필요합니다."),
     DUPLICATE_USERNAME(409, "이미 사용 중인 사용자명입니다."),
+    INVALID_USERNAME_FORMAT(400, "사용자명은 영문/숫자/언더스코어 3~20자여야 합니다."),
+    RESERVED_USERNAME_PREFIX(400, "카카오 로그인 전용으로 예약된 사용자명 형식입니다."),
+    KAKAO_USERNAME_CONFLICT(409, "카카오 로그인에 실패했습니다. 관리자에게 문의해주세요."),
 
     // 카카오 OAuth
     OAUTH_STATE_MISMATCH(401, "OAuth state 값이 유효하지 않습니다."),

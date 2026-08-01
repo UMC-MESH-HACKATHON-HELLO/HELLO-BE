@@ -4,6 +4,8 @@ import com.mesh.hello.domain.auth.dto.KakaoUserInfoResDTO;
 import com.mesh.hello.domain.user.domain.User;
 import com.mesh.hello.domain.user.enums.Provider;
 import com.mesh.hello.domain.user.repository.UserRepository;
+import com.mesh.hello.global.common.exception.BusinessException;
+import com.mesh.hello.global.common.response.ErrorCode;
 import com.mesh.hello.global.config.KakaoOAuthProperties;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -20,6 +22,7 @@ import org.springframework.web.client.RestClient;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.BDDMockito.given;
@@ -237,6 +240,30 @@ class KakaoOAuthServiceTest {
 
             // then
             assertThat(result.getNickname()).isNull();
+        }
+
+        @Test
+        @DisplayName("username을 이미 로컬 계정이 선점했다면(kakao_ 접두사 스쿼팅) 저장하지 않고 명확한 에러를 던진다")
+        void newUser_usernameSquattedByLocalAccount_throwsConflict() {
+            // given: 신규 카카오 유저(=아직 provider/providerId로는 매칭되지 않음)지만,
+            // 로컬 회원가입이 (지금은 차단되었지만) 과거에 kakao_<providerId> 형태의
+            // username을 이미 선점해둔 상황을 시뮬레이션한다.
+            Long kakaoId = 12345678L;
+            String providerId = String.valueOf(kakaoId);
+            String squattedUsername = KakaoOAuthService.USERNAME_PREFIX + providerId;
+
+            given(userRepository.findByProviderAndProviderId(Provider.KAKAO, providerId))
+                    .willReturn(Optional.empty());
+            given(userRepository.existsByUsername(squattedUsername)).willReturn(true);
+
+            // when & then
+            assertThatThrownBy(() -> kakaoOAuthService.loginOrSignup(makeUserInfo(kakaoId, "실제카카오유저")))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.KAKAO_USERNAME_CONFLICT);
+
+            verify(userRepository, never()).save(any(User.class));
+            verify(passwordEncoder, never()).encode(anyString());
         }
     }
 }

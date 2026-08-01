@@ -43,6 +43,9 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class KakaoOAuthService {
 
+    /** 카카오 소셜 유저의 내부 username 접두사. 로컬 회원가입에서는 예약어로 차단된다({@link AuthService#signup}). */
+    public static final String USERNAME_PREFIX = "kakao_";
+
     private final KakaoOAuthProperties kakaoProps;
     private final RestClient restClient;
     private final UserRepository userRepository;
@@ -179,7 +182,16 @@ public class KakaoOAuthService {
 
         return userRepository.findByProviderAndProviderId(Provider.KAKAO, providerId)
                 .orElseGet(() -> {
-                    String username = "kakao_" + providerId;
+                    String username = USERNAME_PREFIX + providerId;
+
+                    // username은 전역 유니크 컬럼이라, 같은 이름을 가진 LOCAL 계정이 이미 있으면
+                    // 저장 시 유니크 제약 위반이 발생한다. 회원가입 단에서 kakao_ 접두사를 예약어로
+                    // 막아두었지만(AuthService#signup), 과거 데이터 등 예외 상황을 대비해 방어적으로 확인한다.
+                    if (userRepository.existsByUsername(username)) {
+                        log.warn("카카오 신규 유저 생성 시 username 충돌: username={}", username);
+                        throw new BusinessException(ErrorCode.KAKAO_USERNAME_CONFLICT);
+                    }
+
                     // 소셜 유저는 비밀번호 로그인 불가 → 추측 불가능한 랜덤 BCrypt 해시 저장
                     String password = passwordEncoder.encode(UUID.randomUUID().toString());
 

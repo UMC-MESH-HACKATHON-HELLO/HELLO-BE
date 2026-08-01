@@ -40,6 +40,9 @@ public class AuthService {
     /** 익명 sessionId를 전달받는 키(요청 헤더 / HttpSession 속성 공통). */
     private static final String SESSION_ID_KEY = "sessionId";
 
+    /** 로컬 회원가입 username 허용 형식: 영문/숫자/언더스코어 3~20자. */
+    private static final String USERNAME_FORMAT = "^[a-zA-Z0-9_]{3,20}$";
+
     private final AuthenticationManager authenticationManager;
     private final SecurityContextRepository securityContextRepository;
     private final UserRepository userRepository;
@@ -80,14 +83,29 @@ public class AuthService {
         }
     }
 
-    /** 최소 회원가입(범위 밖이지만 시연용). username 중복 체크 + BCrypt 저장. */
+    /**
+     * 최소 회원가입(범위 밖이지만 시연용). username 형식 검증 + 중복 체크 + BCrypt 저장.
+     *
+     * <p>{@code kakao_} 접두사는 {@link KakaoOAuthService}가 소셜 유저의 내부 username을
+     * {@code kakao_<providerId>} 형태로 결정적으로 생성하는 데 사용하는 예약어다.
+     * 로컬 가입에서 이 접두사를 허용하면, 실제 카카오 유저가 가입/로그인하기 전에
+     * 동일한 username을 로컬 계정이 선점해 카카오 로그인이 막히는 문제가 생긴다
+     * (username은 전역 유니크 컬럼).</p>
+     */
     @Transactional
     public Long signup(SignupRequest request) {
-        if (userRepository.existsByUsername(request.username())) {
+        String username = request.username();
+        if (username == null || !username.matches(USERNAME_FORMAT)) {
+            throw new BusinessException(ErrorCode.INVALID_USERNAME_FORMAT);
+        }
+        if (username.startsWith(KakaoOAuthService.USERNAME_PREFIX)) {
+            throw new BusinessException(ErrorCode.RESERVED_USERNAME_PREFIX);
+        }
+        if (userRepository.existsByUsername(username)) {
             throw new BusinessException(ErrorCode.DUPLICATE_USERNAME);
         }
         User user = User.builder()
-                .username(request.username())
+                .username(username)
                 .password(passwordEncoder.encode(request.password()))
                 .nickname(request.nickname())
                 .build();
