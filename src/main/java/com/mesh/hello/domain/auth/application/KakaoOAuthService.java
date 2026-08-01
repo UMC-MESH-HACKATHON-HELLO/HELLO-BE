@@ -178,6 +178,10 @@ public class KakaoOAuthService {
      */
     @Transactional
     public User loginOrSignup(KakaoUserInfoResDTO userInfo) {
+        if (userInfo.getId() == null) {
+            log.warn("카카오 사용자 정보에 id가 없음 (null)");
+            throw new BusinessException(ErrorCode.KAKAO_USER_INFO_FAILED);
+        }
         String providerId = String.valueOf(userInfo.getId());
 
         return userRepository.findByProviderAndProviderId(Provider.KAKAO, providerId)

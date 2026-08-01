@@ -123,6 +123,20 @@ class KakaoOAuthServiceTest {
         }
 
         @Test
+        @DisplayName("카카오 사용자 정보의 id가 null이면 조회/저장 없이 KAKAO_USER_INFO_FAILED 에러를 던진다")
+        void nullKakaoId_throwsBeforeAnyLookupOrSave() {
+            // given: 카카오 응답이 비정상이라 id가 null인 경우
+            // (가드가 없으면 providerId="null" 문자열로 조회/저장이 진행되어 kakao_null 계정이 생김)
+            assertThatThrownBy(() -> kakaoOAuthService.loginOrSignup(makeUserInfo(null, "닉네임")))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.KAKAO_USER_INFO_FAILED);
+
+            verify(userRepository, never()).findByProviderAndProviderId(any(Provider.class), anyString());
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
         @DisplayName("기존 카카오 유저가 있으면 새로 저장하지 않고 기존 유저를 반환한다")
         void existingUser_returnsWithoutSaving() {
             // given
