@@ -141,6 +141,12 @@ public class AuthService {
         context.setAuthentication(authToken);
         SecurityContextHolder.setContext(context);
 
+        // 세션 고정 공격 방지: 익명 세션이 그대로 인증 세션으로 승격되지 않도록,
+        // 기존 세션이 있는 경우에만 세션 ID를 교체한다(속성은 유지됨).
+        if (httpRequest.getSession(false) != null) {
+            httpRequest.changeSessionId();
+        }
+
         // 수동 인증 시 컨텍스트를 세션에 직접 저장하지 않으면 다음 요청에서 인증이 유지되지 않는다.
         securityContextRepository.saveContext(context, httpRequest, httpResponse);
 
