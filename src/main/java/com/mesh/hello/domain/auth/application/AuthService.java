@@ -91,6 +91,11 @@ public class AuthService {
      * 로컬 가입에서 이 접두사를 허용하면, 실제 카카오 유저가 가입/로그인하기 전에
      * 동일한 username을 로컬 계정이 선점해 카카오 로그인이 막히는 문제가 생긴다
      * (username은 전역 유니크 컬럼).</p>
+     *
+     * <p>비교는 대소문자를 무시한다. MySQL의 기본 collation(utf8mb4_0900_ai_ci)은
+     * case-insensitive이므로 {@code KAKAO_123}과 {@code kakao_123}이 같은 유니크 자리를
+     * 차지한다. 컬럼에 collation이 명시되지 않아 DB 환경에 따라 동작이 달라질 수 있으므로
+     * 애플리케이션 레이어에서 대소문자 무관하게 차단한다.</p>
      */
     @Transactional
     public Long signup(SignupRequest request) {
@@ -98,7 +103,10 @@ public class AuthService {
         if (username == null || !username.matches(USERNAME_FORMAT)) {
             throw new BusinessException(ErrorCode.INVALID_USERNAME_FORMAT);
         }
-        if (username.startsWith(KakaoOAuthService.USERNAME_PREFIX)) {
+        // regionMatches(ignoreCase=true)로 대소문자 변형(KAKAO_, KaKaO_ 등)을 모두 차단
+        if (username.regionMatches(true, 0,
+                KakaoOAuthService.USERNAME_PREFIX, 0,
+                KakaoOAuthService.USERNAME_PREFIX.length())) {
             throw new BusinessException(ErrorCode.RESERVED_USERNAME_PREFIX);
         }
         if (userRepository.existsByUsername(username)) {

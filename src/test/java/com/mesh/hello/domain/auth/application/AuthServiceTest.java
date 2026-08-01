@@ -33,6 +33,11 @@ import static org.mockito.Mockito.verify;
  * 결정적 username 생성 규칙, {@link KakaoOAuthService#USERNAME_PREFIX})를 예약어로
  * 차단하지 않으면, 공격자가 실제 카카오 유저보다 먼저 {@code kakao_<providerId>}
  * username을 선점해 해당 카카오 유저의 로그인을 막을 수 있다(username 전역 유니크 제약).</p>
+ *
+ * <p>대소문자 변형 회귀 시나리오: MySQL 기본 collation(utf8mb4_0900_ai_ci)은
+ * case-insensitive이므로 {@code KAKAO_123}과 {@code kakao_123}이 동일한 유니크 자리를 차지한다.
+ * 비교를 {@code startsWith}(case-sensitive)로만 하면 {@code KAKAO_} · {@code KaKaO_} 등
+ * 대소문자 변형이 검증을 통과해 선점 공격이 가능해진다.</p>
  */
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -86,6 +91,35 @@ class AuthServiceTest {
                     .extracting(e -> ((BusinessException) e).getErrorCode())
                     .isEqualTo(ErrorCode.RESERVED_USERNAME_PREFIX);
 
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        /**
+         * 대소문자 변형 회귀 테스트.
+         *
+         * <p>MySQL utf8mb4_0900_ai_ci(기본 collation)에서는 {@code KAKAO_123}이
+         * {@code kakao_123}과 동일한 유니크 자리를 차지한다.
+         * 컬럼에 collation이 명시되지 않으면 DB 환경마다 결과가 달라지므로
+         * 애플리케이션 레이어에서 대소문자 무관하게 차단해야 한다.</p>
+         */
+        @ParameterizedTest(name = "[{index}] username=\"{0}\"")
+        @ValueSource(strings = {
+                "KAKAO_12345678",   // 전체 대문자
+                "KaKaO_12345678",   // 혼합 대소문자
+                "Kakao_12345678",   // 첫 글자만 대문자
+                "KAKAO_",           // 접두사만
+                "kAkAo_99999",      // 무작위 대소문자
+        })
+        @DisplayName("kakao_ 접두사의 대소문자 변형도 RESERVED_USERNAME_PREFIX 에러를 던진다")
+        void kakaoPrefixCaseVariants_areRejected(String usernameVariant) {
+            SignupRequest request = new SignupRequest(usernameVariant, "password123", "닉네임");
+
+            assertThatThrownBy(() -> authService.signup(request))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.RESERVED_USERNAME_PREFIX);
+
+            verify(userRepository, never()).existsByUsername(anyString());
             verify(userRepository, never()).save(any(User.class));
         }
     }
