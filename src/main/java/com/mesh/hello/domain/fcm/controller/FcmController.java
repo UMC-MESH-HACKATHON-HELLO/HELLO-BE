@@ -29,8 +29,7 @@ public class FcmController {
 
     @DeleteMapping("/helper/fcm-token")
     public void delete(
-            @AuthenticationPrincipal UserDetails userDetails,
-            @RequestBody TokenDeleteRequest request
+            @AuthenticationPrincipal UserDetails userDetails
     ) {
         String username = userDetails.getUsername();
         fcmService.deleteToken(username);
