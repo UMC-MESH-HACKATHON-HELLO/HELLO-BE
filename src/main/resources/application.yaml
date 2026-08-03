@@ -21,6 +21,10 @@ spring:
       hibernate:
         format_sql: true
 
+  h2:
+    console:
+      enabled: true
+
   data:
     redis:
       host: localhost
@@ -31,9 +35,31 @@ livekit:
   api-key: ${LIVEKIT_API_KEY}
   api-secret: ${LIVEKIT_API_SECRET}
 
+kakao:
+  client-id: ${KAKAO_CLIENT_ID}
+  client-secret: ${KAKAO_CLIENT_SECRET}
+  redirect-uri: ${KAKAO_REDIRECT_URI}
+  auth-uri: https://kauth.kakao.com/oauth/authorize
+  token-uri: https://kauth.kakao.com/oauth/token
+  user-info-uri: https://kapi.kakao.com/v2/user/me
+
+frontend-url: ${FRONTEND_URL:http://localhost:3000}
+
 aws:
   s3:
     bucket: ${S3_BUCKET}
     region: ${AWS_REGION}
     access-key: ${AWS_ACCESS_KEY}
     secret-key: ${AWS_SECRET_KEY}
+
+firebase:
+  config:
+    path: firebase-adminsdk.json
+web:
+  resources:
+    add-mappings: false
+
+rest-client:
+  timeout:
+    connect-millis: 5000
+    read-millis: 5000
