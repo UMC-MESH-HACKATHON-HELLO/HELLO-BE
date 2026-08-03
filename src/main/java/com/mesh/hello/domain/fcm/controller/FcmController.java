@@ -3,7 +3,10 @@ package com.mesh.hello.domain.fcm.controller;
 import com.mesh.hello.domain.fcm.application.FcmService;
 import com.mesh.hello.domain.fcm.dto.TokenDeleteRequest;
 import com.mesh.hello.domain.fcm.dto.TokenRequest;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -17,21 +20,19 @@ public class FcmController {
 
     @PostMapping("/helper/fcm-token")
     public void register(
-            // @AuthenticationPrincipal AuthMember user,
-            // 토큰 기반 인증 완성되면 주석 해제
-            @RequestBody TokenRequest request
+            @AuthenticationPrincipal UserDetails userDetails,
+            @RequestBody TokenRequest tokenRequest
     ) {
-        // fcmService.saveToken(user.getId(), request.token());
-        fcmService.saveToken(request.userId(), request.token());
+        String username = userDetails.getUsername();  // 인증 정보에 username이 들어있다고 함
+        fcmService.saveToken(username, tokenRequest.token());
     }
 
     @DeleteMapping("/helper/fcm-token")
     public void delete(
-            // @AuthenticationPrincipal AuthMember user,
-            // 토큰 기반 인증 완성되면 주석 해제
+            @AuthenticationPrincipal UserDetails userDetails,
             @RequestBody TokenDeleteRequest request
     ) {
-        // fcmService.saveToken(user.getId(), request.token());
-        fcmService.deleteToken(request.userId());
+        String username = userDetails.getUsername();
+        fcmService.deleteToken(username);
     }
 }
