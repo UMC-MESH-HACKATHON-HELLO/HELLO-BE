@@ -6,15 +6,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
-/**
- * REST 컨트롤러 공통 예외 처리. 모든 에러를 {@code {code, message, result:null}} 형식으로 반환한다.
- *
- * <p>HTTP 상태 코드도 {@link ErrorCode#getCode()}와 맞춘다(예: 401 → 401 Unauthorized).</p>
- *
- * <p>주의: 이 핸들러는 HTTP(MVC) 예외만 처리한다. WebSocket(STOMP) {@code @MessageMapping}
- * 예외는 별도의 {@code @MessageExceptionHandler}로 처리해야 한다.</p>
- */
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -26,6 +19,11 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(errorCode.getCode())
                 .body(ApiResponse.error(errorCode.getCode(), e.getMessage()));
+    }
+
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<Void> handleNoResource(NoResourceFoundException e) {
+        return ResponseEntity.notFound().build();
     }
 
     @ExceptionHandler(Exception.class)
