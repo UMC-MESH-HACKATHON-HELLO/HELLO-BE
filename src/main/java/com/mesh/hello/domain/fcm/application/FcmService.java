@@ -24,4 +24,12 @@ public class FcmService {
 
         fcmTokenRepository.save(fcmToken);
     }
+
+    @Transactional
+    public void deleteToken(
+            Long userId
+    ) {
+        fcmTokenRepository.findByUserId(userId)
+                .forEach(FcmToken::softDelete);
+    }
 }
