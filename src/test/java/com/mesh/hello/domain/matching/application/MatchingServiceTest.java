@@ -24,6 +24,10 @@ import com.mesh.hello.global.common.response.ApiResponse;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -234,6 +238,51 @@ class MatchingServiceTest {
                     .isEqualTo(ErrorCode.ALREADY_IN_CALL);
 
             assertThat(matchingRoomRepository.findBySessionId("helper-1")).isPresent();
+        }
+
+        @Test
+        @DisplayName("stopHelperWaiting과 requestMatch가 동시에 경합해도 취소 성공과 매칭이 동시에 일어나지 않는다")
+        void concurrentStopAndMatchAreMutuallyExclusive() throws Exception {
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+
+            int trials = 50;
+            ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+            try {
+                for (int i = 0; i < trials; i++) {
+                    String helper = "race-helper-" + i;
+                    String helpee = "race-helpee-" + i;
+                    matchingQueueRepository.pushHelper(helper);
+
+                    CountDownLatch start = new CountDownLatch(1);
+                    Future<Boolean> cancelSucceeded = executorService.submit(() -> {
+                        start.await();
+                        try {
+                            matchingService.stopHelperWaiting(helper);
+                            return true;
+                        } catch (BusinessException e) {
+                            return false;
+                        }
+                    });
+                    Future<?> matchAttempted = executorService.submit(() -> {
+                        start.await();
+                        matchingService.requestMatch(helpee);
+                        return null;
+                    });
+                    start.countDown();
+
+                    boolean cancelled = cancelSucceeded.get();
+                    matchAttempted.get();
+                    boolean matched = matchingRoomRepository.findBySessionId(helper).isPresent();
+
+                    // 취소가 성공했다면 그 도우미가 방금 매칭되어 있어서는 안 된다(반대도 마찬가지).
+                    assertThat(cancelled && matched)
+                            .as("trial=%d cancelled=%s matched=%s", i, cancelled, matched)
+                            .isFalse();
+                }
+            } finally {
+                executorService.shutdown();
+            }
         }
     }
 

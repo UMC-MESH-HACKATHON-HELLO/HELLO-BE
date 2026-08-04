@@ -123,15 +123,21 @@ public class MatchingService {
     /**
      * 도우미(helper)가 스스로 대기열 등록을 취소한다.
      * 이미 매칭되어 통화 중이면 취소할 수 없고, 애초에 대기열에 없었다면 실패로 처리한다.
+     *
+     * <p>먼저 큐에서 제거를 "시도"하고 그 결과로 판단한다(제거 성공 여부 확인 후 별도로 제거하지 않음).
+     * {@code removeHelper}는 {@link java.util.concurrent.ConcurrentLinkedQueue}의 원자적 CAS 기반이라
+     * {@code popWaitingHelper}(매칭 시도)와 동시에 경합해도 둘 중 하나만 성공하는 것이 보장된다.
+     * 먼저 존재 여부를 확인한 뒤 별도로 제거하면 그 사이에 매칭이 끼어들어
+     * "취소 성공" 응답과 실제 매칭이 동시에 발생하는 경쟁 상태가 생길 수 있다.</p>
      */
     public void stopHelperWaiting(String helperSessionId) {
+        if (matchingQueueRepository.removeHelper(helperSessionId)) {
+            return;
+        }
         if (matchingRoomRepository.findBySessionId(helperSessionId).isPresent()) {
             throw new BusinessException(ErrorCode.ALREADY_IN_CALL);
         }
-        if (!matchingQueueRepository.isHelperWaiting(helperSessionId)) {
-            throw new BusinessException(ErrorCode.NOT_FOUND);
-        }
-        matchingQueueRepository.removeHelper(helperSessionId);
+        throw new BusinessException(ErrorCode.NOT_FOUND);
     }
 
     /**
