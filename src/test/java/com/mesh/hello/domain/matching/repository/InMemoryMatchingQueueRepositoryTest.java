@@ -83,6 +83,25 @@ class InMemoryMatchingQueueRepositoryTest {
             assertThat(queueRepository.getWaitingHelperCount()).isEqualTo(1);
             assertThat(queueRepository.popWaitingHelper()).isPresent().contains(helper2);
         }
+
+        @Test
+        @DisplayName("isHelperWaiting은 큐에 있는 도우미만 true를 반환해야 한다")
+        void isHelperWaitingReflectsQueueState() {
+            // given
+            String waitingHelper = "waiting-helper";
+            String strangerHelper = "stranger-helper";
+            queueRepository.pushHelper(waitingHelper);
+
+            // then
+            assertThat(queueRepository.isHelperWaiting(waitingHelper)).isTrue();
+            assertThat(queueRepository.isHelperWaiting(strangerHelper)).isFalse();
+
+            // when
+            queueRepository.removeHelper(waitingHelper);
+
+            // then
+            assertThat(queueRepository.isHelperWaiting(waitingHelper)).isFalse();
+        }
     }
 
     @Nested

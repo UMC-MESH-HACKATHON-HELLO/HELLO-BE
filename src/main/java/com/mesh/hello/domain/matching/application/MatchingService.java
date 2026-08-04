@@ -5,7 +5,9 @@ import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.stt.application.TranscribeService;
+import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ApiResponse;
+import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -116,6 +118,20 @@ public class MatchingService {
             matchingQueueRepository.pushHelpee(helpeeSessionId);
             matchingQueueRepository.pushHelper(helperSessionId);
         }
+    }
+
+    /**
+     * 도우미(helper)가 스스로 대기열 등록을 취소한다.
+     * 이미 매칭되어 통화 중이면 취소할 수 없고, 애초에 대기열에 없었다면 실패로 처리한다.
+     */
+    public void stopHelperWaiting(String helperSessionId) {
+        if (matchingRoomRepository.findBySessionId(helperSessionId).isPresent()) {
+            throw new BusinessException(ErrorCode.ALREADY_IN_CALL);
+        }
+        if (!matchingQueueRepository.isHelperWaiting(helperSessionId)) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        matchingQueueRepository.removeHelper(helperSessionId);
     }
 
     /**

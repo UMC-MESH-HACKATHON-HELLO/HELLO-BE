@@ -29,6 +29,11 @@ public class InMemoryMatchingQueueRepository implements MatchingQueueRepository 
     }
 
     @Override
+    public boolean isHelperWaiting(String helperSessionId) {
+        return helperQueue.contains(helperSessionId);
+    }
+
+    @Override
     public Integer getWaitingHelperCount() {
         return helperQueue.size();
     }

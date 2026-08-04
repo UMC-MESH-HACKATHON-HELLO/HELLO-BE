@@ -7,6 +7,8 @@ import com.mesh.hello.domain.matching.repository.InMemoryMatchingRoomRepository;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.stt.application.TranscribeService;
+import com.mesh.hello.global.common.exception.BusinessException;
+import com.mesh.hello.global.common.response.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -24,6 +26,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
@@ -187,6 +190,50 @@ class MatchingServiceTest {
             assertThat(matchingQueueRepository.getWaitingHelpeeCount()).isEqualTo(1);
             assertThat(matchingQueueRepository.getWaitingHelperCount()).isEqualTo(1);
             assertThat(matchingRoomRepository.findBySessionId("helpee-1")).isEmpty();
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // stopHelperWaiting
+    // ─────────────────────────────────────────────────────────
+    @Nested
+    @DisplayName("stopHelperWaiting - 도우미 대기 취소")
+    class StopHelperWaitingTest {
+
+        @Test
+        @DisplayName("대기 중인 도우미가 취소하면 큐에서 제거된다")
+        void removesWaitingHelper() {
+            matchingQueueRepository.pushHelper("helper-1");
+
+            matchingService.stopHelperWaiting("helper-1");
+
+            assertThat(matchingQueueRepository.getWaitingHelperCount()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("대기열에 없는 도우미가 취소하면 NOT_FOUND 예외가 발생한다")
+        void notWaitingThrowsNotFound() {
+            assertThatThrownBy(() -> matchingService.stopHelperWaiting("stranger"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.NOT_FOUND);
+
+            assertThat(matchingQueueRepository.getWaitingHelperCount()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("이미 매칭되어 통화 중인 도우미가 취소하면 ALREADY_IN_CALL 예외가 발생하고 방은 유지된다")
+        void alreadyInCallThrows() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+
+            assertThatThrownBy(() -> matchingService.stopHelperWaiting("helper-1"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ALREADY_IN_CALL);
+
+            assertThat(matchingRoomRepository.findBySessionId("helper-1")).isPresent();
         }
     }
 
