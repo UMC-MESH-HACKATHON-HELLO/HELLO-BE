@@ -1,13 +1,17 @@
 package com.mesh.hello.domain.matching.application;
 
+import com.mesh.hello.domain.calling.application.GeminiSummarizationService;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
+import com.mesh.hello.domain.stt.application.TranscribeService;
 import com.mesh.hello.global.common.response.ApiResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -20,6 +24,8 @@ public class MatchingService {
     private final MatchingRoomRepository matchingRoomRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final LiveKitService liveKitService;
+    private final TranscribeService transcribeService;
+    private final GeminiSummarizationService geminiSummarizationService;
 
     /**
      * 도움 요청자(helpee)가 매칭을 요청한다.
@@ -31,8 +37,8 @@ public class MatchingService {
 
         if (helperOpt.isEmpty()) {
             matchingQueueRepository.pushHelpee(helpeeSessionId);
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
             );
             return;
@@ -48,13 +54,13 @@ public class MatchingService {
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
 
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken))
             );
-            messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helperSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken))
             );
@@ -62,8 +68,8 @@ public class MatchingService {
         } catch (Exception e) {
             // 토큰 발급 실패 시 도우미 다시 큐에 넣고 helpee에게 실패 알림
             matchingQueueRepository.pushHelper(helperSessionId);
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
             );
         }
@@ -78,8 +84,8 @@ public class MatchingService {
 
         if (helpeeOpt.isEmpty()) {
             matchingQueueRepository.pushHelper(helperSessionId);
-            messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helperSessionId,
                     ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
             );
             return;
@@ -95,13 +101,13 @@ public class MatchingService {
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
 
-            messagingTemplate.convertAndSendToUser(
-                    helpeeSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helpeeToken))
             );
-            messagingTemplate.convertAndSendToUser(
-                    helperSessionId, "/api/v1/queue/signal",
+            messagingTemplate.convertAndSend(
+                    "/api/v1/queue/signal/" + helperSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
                             Map.of("type", "MATCHED", "roomId", roomId, "token", helperToken))
             );
@@ -116,6 +122,16 @@ public class MatchingService {
      * 통화를 정상 종료한다. 방에 있는 양측 모두에게 ENDED를 전송하고 방을 삭제한다.
      */
     public void endCall(String sessionId, String roomId) {
+        matchingRoomRepository.findByRoomId(roomId).ifPresent(room -> {
+            room.markClosing();
+            String transcript = transcribeService.flushTranscript(roomId);
+            int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
+            geminiSummarizationService.markPending(
+                    roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
+            geminiSummarizationService.summarizeAndNotify(
+                    roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
+        });
+
         messagingTemplate.convertAndSend(
                 "/api/v1/topic/room/" + roomId,
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
@@ -132,9 +148,17 @@ public class MatchingService {
         matchingQueueRepository.removeHelpee(sessionId);
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
+            room.markClosing();
+            String transcript = transcribeService.flushTranscript(room.getRoomId());
+            int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
+            geminiSummarizationService.markPending(
+                    room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
+            geminiSummarizationService.summarizeAndNotify(
+                    room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
+
             room.counterpartOf(sessionId).ifPresent(counterpart ->
-                    messagingTemplate.convertAndSendToUser(
-                            counterpart, "/api/v1/queue/signal",
+                    messagingTemplate.convertAndSend(
+                            "/api/v1/queue/signal/" + counterpart,
                             ApiResponse.ok("상대방의 연결이 종료되었습니다.", Map.of("type", "PARTNER_DISCONNECTED"))
                     )
             );

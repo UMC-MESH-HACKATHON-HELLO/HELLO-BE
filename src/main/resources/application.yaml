@@ -37,3 +37,10 @@ aws:
     region: ${AWS_REGION}
     access-key: ${AWS_ACCESS_KEY}
     secret-key: ${AWS_SECRET_KEY}
+
+rtzr:
+  client-id: ${RTZR_CLIENT_ID}
+  client-secret: ${RTZR_CLIENT_SECRET}
+
+gemini:
+  api-key: ${GEMINI_API_KEY}
