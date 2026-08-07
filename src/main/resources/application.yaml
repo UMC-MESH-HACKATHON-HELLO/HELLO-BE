@@ -59,3 +59,9 @@ rest-client:
   timeout:
     connect-millis: 5000
     read-millis: 5000
+rtzr:
+  client-id: ${RTZR_CLIENT_ID}
+  client-secret: ${RTZR_CLIENT_SECRET}
+
+gemini:
+  api-key: ${GEMINI_API_KEY}
