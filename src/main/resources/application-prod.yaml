@@ -45,7 +45,6 @@ aws:
     region: ${AWS_REGION}
     access-key: ${AWS_ACCESS_KEY}
     secret-key: ${AWS_SECRET_KEY}
-    secret-key: ${AWS_SECRET_KEY}
 
 gemini:
   api-key: ${GEMINI_API_KEY}
