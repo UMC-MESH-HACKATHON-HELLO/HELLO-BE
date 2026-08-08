@@ -1,12 +1,14 @@
 package com.mesh.hello.domain.matching.application;
 
 import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
+import com.mesh.hello.domain.calling.application.GeminiSummarizationService;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.InMemoryMatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.InMemoryMatchingRoomRepository;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.reward.application.PointService;
+import com.mesh.hello.domain.stt.application.TranscribeService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -38,6 +40,12 @@ class MatchingServiceTest {
     private LiveKitService liveKitService;
 
     @Mock
+    private TranscribeService transcribeService;
+
+    @Mock
+    private GeminiSummarizationService geminiSummarizationService;
+
+    @Mock
     private SessionAccountRepository sessionAccountRepository;
 
     @Mock
@@ -56,12 +64,14 @@ class MatchingServiceTest {
                 matchingRoomRepository,
                 messagingTemplate,
                 liveKitService,
+                transcribeService,
+                geminiSummarizationService,
                 sessionAccountRepository,
                 pointService
         );
     }
 
-    /** convertAndSend(ToUser)로 전달된 ApiResponse에서 내부 result(Map)만 추출. */
+    /** convertAndSend로 전달된 ApiResponse에서 내부 result(Map)만 추출. */
     @SuppressWarnings("unchecked")
     private static Map<String, String> resultOf(Object payload) {
         return (Map<String, String>) ((ApiResponse<?>) payload).getResult();
@@ -81,8 +91,8 @@ class MatchingServiceTest {
 
             assertThat(matchingQueueRepository.getWaitingHelpeeCount()).isEqualTo(1);
             ArgumentCaptor<Object> noHelperCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(messagingTemplate).convertAndSendToUser(
-                    eq("helpee-1"), eq("/queue/signal"), noHelperCaptor.capture()
+            verify(messagingTemplate).convertAndSend(
+                    eq("/api/v1/queue/signal/helpee-1"), noHelperCaptor.capture()
             );
             assertThat(resultOf(noHelperCaptor.getValue())).isEqualTo(Map.of("type", "NO_HELPER"));
         }
@@ -102,7 +112,7 @@ class MatchingServiceTest {
             // 양측 MATCHED 수신 확인
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
             verify(messagingTemplate, times(2))
-                    .convertAndSendToUser(anyString(), eq("/queue/signal"), captor.capture());
+                    .convertAndSend(startsWith("/api/v1/queue/signal/"), captor.capture());
 
             List<Map<String, String>> results = captor.getAllValues().stream()
                     .map(MatchingServiceTest::resultOf).toList();
@@ -129,8 +139,8 @@ class MatchingServiceTest {
             assertThat(matchingRoomRepository.findBySessionId("helpee-1")).isEmpty();
             // helpee에게 실패 알림
             ArgumentCaptor<Object> noHelperCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(messagingTemplate).convertAndSendToUser(
-                    eq("helpee-1"), eq("/queue/signal"), noHelperCaptor.capture()
+            verify(messagingTemplate).convertAndSend(
+                    eq("/api/v1/queue/signal/helpee-1"), noHelperCaptor.capture()
             );
             assertThat(resultOf(noHelperCaptor.getValue())).isEqualTo(Map.of("type", "NO_HELPER"));
         }
@@ -150,8 +160,8 @@ class MatchingServiceTest {
 
             assertThat(matchingQueueRepository.getWaitingHelperCount()).isEqualTo(1);
             ArgumentCaptor<Object> waitingCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(messagingTemplate).convertAndSendToUser(
-                    eq("helper-1"), eq("/queue/signal"), waitingCaptor.capture()
+            verify(messagingTemplate).convertAndSend(
+                    eq("/api/v1/queue/signal/helper-1"), waitingCaptor.capture()
             );
             assertThat(resultOf(waitingCaptor.getValue())).isEqualTo(Map.of("type", "WAITING"));
         }
@@ -171,7 +181,7 @@ class MatchingServiceTest {
 
             ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
             verify(messagingTemplate, times(2))
-                    .convertAndSendToUser(anyString(), eq("/queue/signal"), captor.capture());
+                    .convertAndSend(startsWith("/api/v1/queue/signal/"), captor.capture());
             assertThat(captor.getAllValues().stream().map(MatchingServiceTest::resultOf))
                     .allMatch(m -> "MATCHED".equals(m.get("type")));
         }
@@ -212,7 +222,7 @@ class MatchingServiceTest {
 
             ArgumentCaptor<Object> endedCaptor = ArgumentCaptor.forClass(Object.class);
             verify(messagingTemplate).convertAndSend(
-                    eq("/topic/room/" + roomId), endedCaptor.capture()
+                    eq("/api/v1/topic/room/" + roomId), endedCaptor.capture()
             );
             assertThat(resultOf(endedCaptor.getValue())).isEqualTo(Map.of("type", "ENDED"));
             assertThat(matchingRoomRepository.findBySessionId("helpee-1")).isEmpty();
@@ -264,7 +274,7 @@ class MatchingServiceTest {
             matchingService.handleDisconnect("helper-1");
 
             assertThat(matchingQueueRepository.getWaitingHelperCount()).isEqualTo(0);
-            verify(messagingTemplate, never()).convertAndSendToUser(anyString(), anyString(), any());
+            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
         }
 
         @Test
@@ -281,8 +291,8 @@ class MatchingServiceTest {
             matchingService.handleDisconnect("helper-1");
 
             ArgumentCaptor<Object> partnerCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(messagingTemplate).convertAndSendToUser(
-                    eq("helpee-1"), eq("/queue/signal"), partnerCaptor.capture()
+            verify(messagingTemplate).convertAndSend(
+                    eq("/api/v1/queue/signal/helpee-1"), partnerCaptor.capture()
             );
             assertThat(resultOf(partnerCaptor.getValue())).isEqualTo(Map.of("type", "PARTNER_DISCONNECTED"));
             assertThat(matchingRoomRepository.findBySessionId("helper-1")).isEmpty();
@@ -302,8 +312,8 @@ class MatchingServiceTest {
             matchingService.handleDisconnect("helpee-1");
 
             ArgumentCaptor<Object> partnerCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(messagingTemplate).convertAndSendToUser(
-                    eq("helper-1"), eq("/queue/signal"), partnerCaptor.capture()
+            verify(messagingTemplate).convertAndSend(
+                    eq("/api/v1/queue/signal/helper-1"), partnerCaptor.capture()
             );
             assertThat(resultOf(partnerCaptor.getValue())).isEqualTo(Map.of("type", "PARTNER_DISCONNECTED"));
             assertThat(matchingRoomRepository.findBySessionId("helpee-1")).isEmpty();
