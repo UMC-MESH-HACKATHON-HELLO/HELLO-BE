@@ -6,20 +6,23 @@ spring:
     active: local
 
   datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    url: ${DB_URL}
-    username: ${DB_USER}
-    password: ${DB_PW}
+    driver-class-name: org.h2.Driver
+    url: jdbc:h2:mem:testdb
+    username: sa
+    password:
 
   jpa:
-    database: mysql
-    database-platform: org.hibernate.dialect.MySQLDialect
+    database-platform: org.hibernate.dialect.H2Dialect
     show-sql: true
     hibernate:
-      ddl-auto: update
+      ddl-auto: create-drop
     properties:
       hibernate:
         format_sql: true
+
+  h2:
+    console:
+      enabled: true
 
   data:
     redis:
@@ -31,6 +34,16 @@ livekit:
   api-key: ${LIVEKIT_API_KEY}
   api-secret: ${LIVEKIT_API_SECRET}
 
+kakao:
+  client-id: ${KAKAO_CLIENT_ID}
+  client-secret: ${KAKAO_CLIENT_SECRET}
+  redirect-uri: ${KAKAO_REDIRECT_URI}
+  auth-uri: https://kauth.kakao.com/oauth/authorize
+  token-uri: https://kauth.kakao.com/oauth/token
+  user-info-uri: https://kapi.kakao.com/v2/user/me
+
+frontend-url: ${FRONTEND_URL:http://localhost:3000}
+
 aws:
   s3:
     bucket: ${S3_BUCKET}
@@ -38,6 +51,14 @@ aws:
     access-key: ${AWS_ACCESS_KEY}
     secret-key: ${AWS_SECRET_KEY}
 
+web:
+  resources:
+    add-mappings: false
+
+rest-client:
+  timeout:
+    connect-millis: 5000
+    read-millis: 5000
 rtzr:
   client-id: ${RTZR_CLIENT_ID}
   client-secret: ${RTZR_CLIENT_SECRET}

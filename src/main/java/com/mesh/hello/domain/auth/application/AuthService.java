@@ -11,11 +11,14 @@ import com.mesh.hello.global.common.response.ErrorCode;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+import java.util.List;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.GrantedAuthority;
+import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,6 +29,9 @@ import org.springframework.security.authentication.AuthenticationManager;
 
 /**
  * 도우미 세션 인증. 익명 세션 위에 로그인을 얹는다.
+ *
+ * <p>{@link #createSession}은 인증 방식(로컬/소셜)과 무관하게 세션을 발급하는 공통 로직이다.
+ * 향후 카카오 OAuth 서비스에서 User 객체를 확보한 뒤 이 메서드를 직접 호출하면 된다.</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -34,6 +40,9 @@ public class AuthService {
     /** 익명 sessionId를 전달받는 키(요청 헤더 / HttpSession 속성 공통). */
     private static final String SESSION_ID_KEY = "sessionId";
 
+    /** 로컬 회원가입 username 허용 형식: 영문/숫자/언더스코어 3~20자. */
+    private static final String USERNAME_FORMAT = "^[a-zA-Z0-9_]{3,20}$";
+
     private final AuthenticationManager authenticationManager;
     private final SecurityContextRepository securityContextRepository;
     private final UserRepository userRepository;
@@ -41,8 +50,7 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
 
     /**
-     * 로그인. 인증 성공 시 SecurityContext를 세션에 명시적으로 저장하고(이후 JSESSIONID로 인증 유지),
-     * 현재 익명 sessionId를 로그인 userId에 바인딩한다.
+     * 로그인. username/password 검증 후 {@link #createSession}을 위임한다.
      */
     @Transactional(readOnly = true)
     public LoginResponse login(LoginRequest request,
@@ -57,18 +65,10 @@ public class AuthService {
             throw new BusinessException(ErrorCode.LOGIN_FAILED);
         }
 
-        // 수동 인증 시 컨텍스트를 세션에 직접 저장하지 않으면 다음 요청에서 인증이 유지되지 않는다.
-        SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(authentication);
-        SecurityContextHolder.setContext(context);
-        securityContextRepository.saveContext(context, httpRequest, httpResponse);
-
         User user = userRepository.findByUsername(authentication.getName())
                 .orElseThrow(() -> new BusinessException(ErrorCode.LOGIN_FAILED));
 
-        // 익명 sessionId ↔ userId 바인딩 (매칭·포인트가 sessionId로 계정 resolve 가능하도록)
-        resolveAnonymousSessionId(httpRequest)
-                .ifPresent(sessionId -> sessionAccountRepository.bind(sessionId, user.getId()));
+        createSession(user, httpRequest, httpResponse);
 
         return new LoginResponse(user.getId(), user.getNickname(), user.getPoints());
     }
@@ -83,14 +83,37 @@ public class AuthService {
         }
     }
 
-    /** 최소 회원가입(범위 밖이지만 시연용). username 중복 체크 + BCrypt 저장. */
+    /**
+     * 최소 회원가입(범위 밖이지만 시연용). username 형식 검증 + 중복 체크 + BCrypt 저장.
+     *
+     * <p>{@code kakao_} 접두사는 {@link KakaoOAuthService}가 소셜 유저의 내부 username을
+     * {@code kakao_<providerId>} 형태로 결정적으로 생성하는 데 사용하는 예약어다.
+     * 로컬 가입에서 이 접두사를 허용하면, 실제 카카오 유저가 가입/로그인하기 전에
+     * 동일한 username을 로컬 계정이 선점해 카카오 로그인이 막히는 문제가 생긴다
+     * (username은 전역 유니크 컬럼).</p>
+     *
+     * <p>비교는 대소문자를 무시한다. MySQL의 기본 collation(utf8mb4_0900_ai_ci)은
+     * case-insensitive이므로 {@code KAKAO_123}과 {@code kakao_123}이 같은 유니크 자리를
+     * 차지한다. 컬럼에 collation이 명시되지 않아 DB 환경에 따라 동작이 달라질 수 있으므로
+     * 애플리케이션 레이어에서 대소문자 무관하게 차단한다.</p>
+     */
     @Transactional
     public Long signup(SignupRequest request) {
-        if (userRepository.existsByUsername(request.username())) {
+        String username = request.username();
+        if (username == null || !username.matches(USERNAME_FORMAT)) {
+            throw new BusinessException(ErrorCode.INVALID_USERNAME_FORMAT);
+        }
+        // regionMatches(ignoreCase=true)로 대소문자 변형(KAKAO_, KaKaO_ 등)을 모두 차단
+        if (username.regionMatches(true, 0,
+                KakaoOAuthService.USERNAME_PREFIX, 0,
+                KakaoOAuthService.USERNAME_PREFIX.length())) {
+            throw new BusinessException(ErrorCode.RESERVED_USERNAME_PREFIX);
+        }
+        if (userRepository.existsByUsername(username)) {
             throw new BusinessException(ErrorCode.DUPLICATE_USERNAME);
         }
         User user = User.builder()
-                .username(request.username())
+                .username(username)
                 .password(passwordEncoder.encode(request.password()))
                 .nickname(request.nickname())
                 .build();
@@ -98,14 +121,89 @@ public class AuthService {
     }
 
     /**
+     * 세션 발급 공통 로직. 인증 방식(로컬/소셜)과 무관하게 재사용된다.
+     *
+     * <ol>
+     *   <li>User 객체에서 권한 목록을 결정한다.</li>
+     *   <li>{@link UsernamePasswordAuthenticationToken}을 생성해 {@code SecurityContext}에 저장한다.</li>
+     *   <li>{@code SecurityContextRepository.saveContext()}로 컨텍스트를 세션에 영속한다
+     *       (이후 JSESSIONID 쿠키로 인증이 유지된다).</li>
+     *   <li>현재 요청에서 익명 sessionId를 추출해 userId에 바인딩한다.</li>
+     * </ol>
+     *
+     * <p>익명 sessionId를 현재 요청에서 뽑을 수 없는 흐름(예: 카카오 콜백)은
+     * {@link #createSession(User, HttpServletRequest, HttpServletResponse, String)}으로
+     * sessionId를 직접 넘긴다.</p>
+     *
+     * @param user         세션을 발급할 도우미 계정
+     * @param httpRequest  현재 HTTP 요청 (익명 sessionId 추출 + 세션 저장에 사용)
+     * @param httpResponse 현재 HTTP 응답 (SecurityContext 저장 시 Set-Cookie 헤더 작성에 사용)
+     */
+    public void createSession(User user,
+                              HttpServletRequest httpRequest,
+                              HttpServletResponse httpResponse) {
+        createSession(user, httpRequest, httpResponse, null);
+    }
+
+    /**
+     * 세션 발급 공통 로직. 익명 sessionId를 호출 측에서 명시적으로 지정하는 오버로드.
+     *
+     * <p>카카오 콜백은 카카오 인가 서버가 보낸 요청이므로 {@code sessionId} 헤더가 없다.
+     * 로그인 진입 시점에 HttpSession에 보관해둔 익명 sessionId를 꺼내 이 파라미터로 넘긴다.</p>
+     *
+     * @param anonymousSessionId 바인딩할 익명 세션 ID.
+     *                           null/공백이면 현재 요청(헤더 → HttpSession 속성)에서 추출을 시도한다.
+     */
+    public void createSession(User user,
+                              HttpServletRequest httpRequest,
+                              HttpServletResponse httpResponse,
+                              String anonymousSessionId) {
+        List<GrantedAuthority> authorities = resolveAuthorities(user);
+
+        UsernamePasswordAuthenticationToken authToken =
+                new UsernamePasswordAuthenticationToken(user.getUsername(), null, authorities);
+
+        SecurityContext context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(authToken);
+        SecurityContextHolder.setContext(context);
+
+        // 세션 고정 공격 방지: 익명 세션이 그대로 인증 세션으로 승격되지 않도록,
+        // 기존 세션이 있는 경우에만 세션 ID를 교체한다(속성은 유지됨).
+        if (httpRequest.getSession(false) != null) {
+            httpRequest.changeSessionId();
+        }
+
+        // 수동 인증 시 컨텍스트를 세션에 직접 저장하지 않으면 다음 요청에서 인증이 유지되지 않는다.
+        securityContextRepository.saveContext(context, httpRequest, httpResponse);
+
+        // 익명 sessionId ↔ userId 바인딩 (매칭·포인트가 sessionId로 계정 resolve 가능하도록)
+        // 명시적으로 넘어온 값이 없으면 현재 요청에서 추출한다(기존 일반 로그인 동작).
+        Optional<String> sessionIdToBind = (anonymousSessionId != null && !anonymousSessionId.isBlank())
+                ? Optional.of(anonymousSessionId)
+                : resolveAnonymousSessionId(httpRequest);
+
+        sessionIdToBind.ifPresent(sessionId -> sessionAccountRepository.bind(sessionId, user.getId()));
+    }
+
+    /**
+     * User 객체를 기준으로 권한 목록을 결정한다.
+     *
+     * <p>현재는 모든 도우미에게 {@code ROLE_HELPER}를 부여한다.
+     * 향후 {@code UserRole} 필드를 추가할 경우 여기서 분기하면 된다.</p>
+     */
+    private List<GrantedAuthority> resolveAuthorities(User user) {
+        return List.of(new SimpleGrantedAuthority("ROLE_HELPER"));
+    }
+
+    /**
      * 현재 요청에서 익명 sessionId를 추출한다.
      *
-     * <p>[가정] 기존 익명 세션(CM102)은 WebSocket 핸드셰이크에서 클라이언트가 {@code sessionId}를
-     * 쿼리파라미터/헤더로 전달하는 방식이며, HTTP 레벨의 서버측 저장소는 확인되지 않았다.
-     * 따라서 여기서는 <b>요청 헤더 {@code sessionId} → HttpSession 속성 {@code sessionId}</b> 순으로
-     * 읽는다고 가정한다. 실제 익명 세션 저장 방식이 다르면 이 메서드만 교체하면 된다.</p>
+     * <p>우선순위: 요청 헤더 {@code sessionId} → HttpSession 속성 {@code sessionId}.</p>
+     *
+     * <p>카카오 로그인 진입 컨트롤러도 이 로직으로 익명 sessionId를 읽어
+     * 콜백까지 왕복시키므로 public이다.</p>
      */
-    private Optional<String> resolveAnonymousSessionId(HttpServletRequest request) {
+    public Optional<String> resolveAnonymousSessionId(HttpServletRequest request) {
         String fromHeader = request.getHeader(SESSION_ID_KEY);
         if (fromHeader != null && !fromHeader.isBlank()) {
             return Optional.of(fromHeader);
