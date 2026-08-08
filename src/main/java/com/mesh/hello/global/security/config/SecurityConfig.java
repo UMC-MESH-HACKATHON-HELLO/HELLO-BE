@@ -47,6 +47,8 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // 로그인/가입/로그아웃
                         .requestMatchers("/api/v1/login", "/api/v1/signup", "/api/v1/logout").permitAll()
+                        // 카카오 OAuth (인가코드 요청 리다이렉트, 콜백)
+                        .requestMatchers("/api/v1/oauth/kakao/**").permitAll()
                         // 익명 세션 발급(CM102)
                         .requestMatchers("/api/v1/session").permitAll()
                         // 익명 WebSocket 핸드셰이크/SockJS (어르신·익명 매칭 플로우)
