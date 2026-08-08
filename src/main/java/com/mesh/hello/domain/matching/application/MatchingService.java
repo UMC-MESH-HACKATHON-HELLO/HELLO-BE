@@ -9,6 +9,7 @@ import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ApiResponse;
 import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -16,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MatchingService {
@@ -125,6 +127,9 @@ public class MatchingService {
      * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있으므로, 방 제거는
      * {@link MatchingRoomRepository#deleteByRoomId}의 원자적 제거 결과로 판단해
      * 둘 중 먼저 제거에 성공한 호출만 포인트 적립과 ENDED 브로드캐스트를 수행한다.</p>
+     *
+     * <p>포인트 적립은 {@code PointHistory.roomId}의 유니크 제약으로 같은 방에 대해
+     * 한 번만 반영되며, 적립이 실패하더라도 ENDED 브로드캐스트는 항상 수행한다.</p>
      */
     public void endCall(String sessionId, String roomId) {
         MatchingRoom room = matchingRoomRepository.findByRoomId(roomId).orElse(null);
@@ -139,13 +144,28 @@ public class MatchingService {
             return;
         }
 
-        sessionAccountRepository.findUserId(room.getHelperSessionId())
-                .ifPresent(helperId -> pointService.awardCallCompletePoints(helperId, roomId));
+        awardPointsSafely(room.getHelperSessionId(), roomId);
 
         messagingTemplate.convertAndSend(
                 "/api/v1/topic/room/" + roomId,
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
         );
+    }
+
+    /**
+     * 로그인된 도우미에게 통화 완료 포인트를 적립한다.
+     *
+     * <p>적립 실패(비로그인, 중복 적립 등)가 ENDED 브로드캐스트를 막지 않도록
+     * 예외를 여기서 흡수한다.</p>
+     */
+    private void awardPointsSafely(String helperSessionId, String roomId) {
+        sessionAccountRepository.findUserId(helperSessionId).ifPresent(helperId -> {
+            try {
+                pointService.awardCallCompletePoints(helperId, roomId);
+            } catch (Exception e) {
+                log.warn("통화 완료 포인트 적립 실패: helperId={}, roomId={}", helperId, roomId, e);
+            }
+        });
     }
 
     /**

@@ -41,8 +41,8 @@ public class InMemoryMatchingRoomRepository implements MatchingRoomRepository {
     public Optional<MatchingRoom> deleteByRoomId(String roomId) {
         MatchingRoom room = roomsById.remove(roomId);
         if (room != null) {
-            roomIdBySession.remove(room.getHelpeeSessionId());
-            roomIdBySession.remove(room.getHelperSessionId());
+            roomIdBySession.remove(room.getHelpeeSessionId(), roomId);
+            roomIdBySession.remove(room.getHelperSessionId(), roomId);
         }
         return Optional.ofNullable(room);
     }
