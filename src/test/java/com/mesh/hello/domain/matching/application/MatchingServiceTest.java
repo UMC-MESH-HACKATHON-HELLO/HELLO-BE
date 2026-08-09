@@ -243,7 +243,9 @@ class MatchingServiceTest {
         @Test
         @DisplayName("stopHelperWaiting과 requestMatch가 동시에 경합해도 취소 성공과 매칭이 동시에 일어나지 않는다")
         void concurrentStopAndMatchAreMutuallyExclusive() throws Exception {
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            // 취소 스레드가 락을 계속 선점해 50번 트라이얼 내내 매칭이 한 번도 안 일어날 수도 있는
+            // 정상적인 레이스 결과이므로, 스텁 미사용을 오류로 취급하지 않도록 lenient 처리한다.
+            lenient().when(liveKitService.createToken(anyString(), anyString())).thenReturn("token");
 
             int trials = 50;
             ExecutorService executorService = Executors.newFixedThreadPool(2);
@@ -280,6 +282,42 @@ class MatchingServiceTest {
                             .as("trial=%d cancelled=%s matched=%s", i, cancelled, matched)
                             .isFalse();
                 }
+            } finally {
+                executorService.shutdown();
+            }
+        }
+
+        @Test
+        @DisplayName("큐에서 pop된 뒤 방 저장 전(LiveKit 토큰 발급 중) 취소를 시도하면 " +
+                "NOT_FOUND로 오판하지 않고 ALREADY_IN_CALL을 던진다")
+        void cancelDuringInFlightMatchingIsRejectedNotSilentlyMismatched() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+
+            CountDownLatch tokenCallStarted = new CountDownLatch(1);
+            CountDownLatch proceedWithToken = new CountDownLatch(1);
+
+            given(liveKitService.createToken(anyString(), anyString())).willAnswer(invocation -> {
+                tokenCallStarted.countDown();
+                proceedWithToken.await();
+                return "token";
+            });
+
+            ExecutorService executorService = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> matchFuture = executorService.submit(() -> matchingService.requestMatch("helpee-1"));
+
+                // helper는 이미 큐에서 pop됐지만 아직 방(room)에는 저장되지 않은 순간까지 대기
+                tokenCallStarted.await();
+
+                assertThatThrownBy(() -> matchingService.stopHelperWaiting("helper-1"))
+                        .isInstanceOf(BusinessException.class)
+                        .extracting(e -> ((BusinessException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.ALREADY_IN_CALL);
+
+                proceedWithToken.countDown();
+                matchFuture.get();
+
+                assertThat(matchingRoomRepository.findBySessionId("helper-1")).isPresent();
             } finally {
                 executorService.shutdown();
             }
