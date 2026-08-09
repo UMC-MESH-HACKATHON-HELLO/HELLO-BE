@@ -13,10 +13,15 @@ public record CallSummaryResponse(
 ) {
 
     public static CallSummaryResponse from(CallSummary summary) {
+        // category 컬럼 추가 이전에 완료된 레코드는 category가 null로 남아있으므로 ETC로 방어적 처리한다.
+        CallSummary.CallCategory category = summary.getCategory() != null
+                ? summary.getCategory()
+                : CallSummary.CallCategory.ETC;
+
         return new CallSummaryResponse(
                 summary.getRoomId(),
                 summary.getSummary(),
-                summary.getCategory(),
+                category,
                 summary.getDurationSec(),
                 summary.getCompletedAt()
         );
