@@ -68,7 +68,7 @@ class InMemoryMatchingQueueRepositoryTest {
         }
 
         @Test
-        @DisplayName("도우미가 대기를 취소하거나 이탈하면 큐에서 정상적으로 삭제되어야 한다")
+        @DisplayName("도우미가 대기를 취소하거나 이탈하면 큐에서 정상적으로 삭제되고 true를 반환해야 한다")
         void removeHelperSuccess() {
             // given
             String helper1 = "helper-1";
@@ -77,11 +77,22 @@ class InMemoryMatchingQueueRepositoryTest {
             queueRepository.pushHelper(helper2);
 
             // when
-            queueRepository.removeHelper(helper1);
+            boolean removed = queueRepository.removeHelper(helper1);
 
             // then
+            assertThat(removed).isTrue();
             assertThat(queueRepository.getWaitingHelperCount()).isEqualTo(1);
             assertThat(queueRepository.popWaitingHelper()).isPresent().contains(helper2);
+        }
+
+        @Test
+        @DisplayName("대기열에 없는 도우미를 제거 시도하면 false를 반환해야 한다")
+        void removeHelperNotWaitingReturnsFalse() {
+            // when
+            boolean removed = queueRepository.removeHelper("stranger-helper");
+
+            // then
+            assertThat(removed).isFalse();
         }
     }
 
@@ -183,6 +194,44 @@ class InMemoryMatchingQueueRepositoryTest {
             // then
             assertThat(successCount.get()).isEqualTo(threadCount);
             assertThat(queueRepository.getWaitingHelperCount()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("같은 도우미를 popWaitingHelper(매칭)와 removeHelper(취소)가 동시에 경합해도 정확히 한쪽만 성공해야 한다")
+        void concurrentPopAndRemoveOnSameHelperAreMutuallyExclusive() throws Exception {
+            int trials = 300;
+            ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+            try {
+                for (int i = 0; i < trials; i++) {
+                    String helper = "race-helper-" + i;
+                    queueRepository.pushHelper(helper);
+
+                    CountDownLatch start = new CountDownLatch(1);
+                    java.util.concurrent.Future<Optional<String>> popFuture = executorService.submit(() -> {
+                        start.await();
+                        return queueRepository.popWaitingHelper();
+                    });
+                    java.util.concurrent.Future<Boolean> removeFuture = executorService.submit(() -> {
+                        start.await();
+                        return queueRepository.removeHelper(helper);
+                    });
+                    start.countDown();
+
+                    Optional<String> popped = popFuture.get();
+                    boolean removed = removeFuture.get();
+                    boolean poppedThisHelper = popped.isPresent() && popped.get().equals(helper);
+
+                    // 매칭(pop)과 취소(remove) 중 정확히 하나만 이 도우미를 가져가야 한다.
+                    // 둘 다 성공하면(취소 응답 후 매칭도 성사) 이슈의 레이스 컨디션이 재현된 것.
+                    assertThat(poppedThisHelper ^ removed)
+                            .as("trial=%d popped=%s removed=%s", i, poppedThisHelper, removed)
+                            .isTrue();
+                    assertThat(queueRepository.getWaitingHelperCount()).isEqualTo(0);
+                }
+            } finally {
+                executorService.shutdown();
+            }
         }
     }
 }

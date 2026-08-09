@@ -7,6 +7,8 @@ import com.mesh.hello.domain.matching.repository.InMemoryMatchingRoomRepository;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.stt.application.TranscribeService;
+import com.mesh.hello.global.common.exception.BusinessException;
+import com.mesh.hello.global.common.response.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -22,8 +24,13 @@ import com.mesh.hello.global.common.response.ApiResponse;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
@@ -187,6 +194,133 @@ class MatchingServiceTest {
             assertThat(matchingQueueRepository.getWaitingHelpeeCount()).isEqualTo(1);
             assertThat(matchingQueueRepository.getWaitingHelperCount()).isEqualTo(1);
             assertThat(matchingRoomRepository.findBySessionId("helpee-1")).isEmpty();
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // stopHelperWaiting
+    // ─────────────────────────────────────────────────────────
+    @Nested
+    @DisplayName("stopHelperWaiting - 도우미 대기 취소")
+    class StopHelperWaitingTest {
+
+        @Test
+        @DisplayName("대기 중인 도우미가 취소하면 큐에서 제거된다")
+        void removesWaitingHelper() {
+            matchingQueueRepository.pushHelper("helper-1");
+
+            matchingService.stopHelperWaiting("helper-1");
+
+            assertThat(matchingQueueRepository.getWaitingHelperCount()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("대기열에 없는 도우미가 취소하면 NOT_FOUND 예외가 발생한다")
+        void notWaitingThrowsNotFound() {
+            assertThatThrownBy(() -> matchingService.stopHelperWaiting("stranger"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.NOT_FOUND);
+
+            assertThat(matchingQueueRepository.getWaitingHelperCount()).isEqualTo(0);
+        }
+
+        @Test
+        @DisplayName("이미 매칭되어 통화 중인 도우미가 취소하면 ALREADY_IN_CALL 예외가 발생하고 방은 유지된다")
+        void alreadyInCallThrows() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+
+            assertThatThrownBy(() -> matchingService.stopHelperWaiting("helper-1"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.ALREADY_IN_CALL);
+
+            assertThat(matchingRoomRepository.findBySessionId("helper-1")).isPresent();
+        }
+
+        @Test
+        @DisplayName("stopHelperWaiting과 requestMatch가 동시에 경합해도 취소 성공과 매칭이 동시에 일어나지 않는다")
+        void concurrentStopAndMatchAreMutuallyExclusive() throws Exception {
+            // 취소 스레드가 락을 계속 선점해 50번 트라이얼 내내 매칭이 한 번도 안 일어날 수도 있는
+            // 정상적인 레이스 결과이므로, 스텁 미사용을 오류로 취급하지 않도록 lenient 처리한다.
+            lenient().when(liveKitService.createToken(anyString(), anyString())).thenReturn("token");
+
+            int trials = 50;
+            ExecutorService executorService = Executors.newFixedThreadPool(2);
+
+            try {
+                for (int i = 0; i < trials; i++) {
+                    String helper = "race-helper-" + i;
+                    String helpee = "race-helpee-" + i;
+                    matchingQueueRepository.pushHelper(helper);
+
+                    CountDownLatch start = new CountDownLatch(1);
+                    Future<Boolean> cancelSucceeded = executorService.submit(() -> {
+                        start.await();
+                        try {
+                            matchingService.stopHelperWaiting(helper);
+                            return true;
+                        } catch (BusinessException e) {
+                            return false;
+                        }
+                    });
+                    Future<?> matchAttempted = executorService.submit(() -> {
+                        start.await();
+                        matchingService.requestMatch(helpee);
+                        return null;
+                    });
+                    start.countDown();
+
+                    boolean cancelled = cancelSucceeded.get();
+                    matchAttempted.get();
+                    boolean matched = matchingRoomRepository.findBySessionId(helper).isPresent();
+
+                    // 취소가 성공했다면 그 도우미가 방금 매칭되어 있어서는 안 된다(반대도 마찬가지).
+                    assertThat(cancelled && matched)
+                            .as("trial=%d cancelled=%s matched=%s", i, cancelled, matched)
+                            .isFalse();
+                }
+            } finally {
+                executorService.shutdown();
+            }
+        }
+
+        @Test
+        @DisplayName("큐에서 pop된 뒤 방 저장 전(LiveKit 토큰 발급 중) 취소를 시도하면 " +
+                "NOT_FOUND로 오판하지 않고 ALREADY_IN_CALL을 던진다")
+        void cancelDuringInFlightMatchingIsRejectedNotSilentlyMismatched() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+
+            CountDownLatch tokenCallStarted = new CountDownLatch(1);
+            CountDownLatch proceedWithToken = new CountDownLatch(1);
+
+            given(liveKitService.createToken(anyString(), anyString())).willAnswer(invocation -> {
+                tokenCallStarted.countDown();
+                proceedWithToken.await();
+                return "token";
+            });
+
+            ExecutorService executorService = Executors.newSingleThreadExecutor();
+            try {
+                Future<?> matchFuture = executorService.submit(() -> matchingService.requestMatch("helpee-1"));
+
+                // helper는 이미 큐에서 pop됐지만 아직 방(room)에는 저장되지 않은 순간까지 대기
+                tokenCallStarted.await();
+
+                assertThatThrownBy(() -> matchingService.stopHelperWaiting("helper-1"))
+                        .isInstanceOf(BusinessException.class)
+                        .extracting(e -> ((BusinessException) e).getErrorCode())
+                        .isEqualTo(ErrorCode.ALREADY_IN_CALL);
+
+                proceedWithToken.countDown();
+                matchFuture.get();
+
+                assertThat(matchingRoomRepository.findBySessionId("helper-1")).isPresent();
+            } finally {
+                executorService.shutdown();
+            }
         }
     }
 

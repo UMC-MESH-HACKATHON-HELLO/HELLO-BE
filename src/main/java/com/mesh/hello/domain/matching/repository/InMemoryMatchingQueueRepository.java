@@ -24,8 +24,8 @@ public class InMemoryMatchingQueueRepository implements MatchingQueueRepository 
     }
 
     @Override
-    public void removeHelper(String helperSessionId) {
-        helperQueue.remove(helperSessionId);
+    public boolean removeHelper(String helperSessionId) {
+        return helperQueue.remove(helperSessionId);
     }
 
     @Override

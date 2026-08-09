@@ -5,7 +5,9 @@ import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.stt.application.TranscribeService;
+import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ApiResponse;
+import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
@@ -14,7 +16,9 @@ import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @RequiredArgsConstructor
@@ -28,23 +32,34 @@ public class MatchingService {
     private final GeminiSummarizationService geminiSummarizationService;
 
     /**
+     * 큐에서 pop됐지만 아직 방 저장이 끝나지 않은(LiveKit 토큰 발급 중인) helper 세션 집합.
+     * {@code helperLock}으로 상태 전이(pop/mark, remove/unmark)를 직렬화해
+     * {@link #stopHelperWaiting}이 "큐에도 없고 방에도 없는" 애매한 순간을 관측하지 않도록 한다.
+     */
+    private final Set<String> helpersBeingMatched = ConcurrentHashMap.newKeySet();
+    private final Object helperLock = new Object();
+
+    /**
      * 도움 요청자(helpee)가 매칭을 요청한다.
      * 대기 중인 도우미(helper)가 있으면 즉시 매칭해 양측에 MATCHED + LiveKit 토큰을 전송한다.
      * 도우미가 없으면 helpee를 대기열에 넣고 NO_HELPER를 전송한다.
      */
     public void requestMatch(String helpeeSessionId) {
-        Optional<String> helperOpt = matchingQueueRepository.popWaitingHelper();
-
-        if (helperOpt.isEmpty()) {
-            matchingQueueRepository.pushHelpee(helpeeSessionId);
-            messagingTemplate.convertAndSend(
-                    "/api/v1/queue/signal/" + helpeeSessionId,
-                    ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
-            );
-            return;
+        String helperSessionId;
+        synchronized (helperLock) {
+            Optional<String> helperOpt = matchingQueueRepository.popWaitingHelper();
+            if (helperOpt.isEmpty()) {
+                matchingQueueRepository.pushHelpee(helpeeSessionId);
+                messagingTemplate.convertAndSend(
+                        "/api/v1/queue/signal/" + helpeeSessionId,
+                        ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
+                );
+                return;
+            }
+            helperSessionId = helperOpt.get();
+            helpersBeingMatched.add(helperSessionId);
         }
 
-        String helperSessionId = helperOpt.get();
         String roomId = UUID.randomUUID().toString();
 
         try {
@@ -53,6 +68,7 @@ public class MatchingService {
 
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
+            helpersBeingMatched.remove(helperSessionId);
 
             messagingTemplate.convertAndSend(
                     "/api/v1/queue/signal/" + helpeeSessionId,
@@ -67,7 +83,10 @@ public class MatchingService {
 
         } catch (Exception e) {
             // 토큰 발급 실패 시 도우미 다시 큐에 넣고 helpee에게 실패 알림
-            matchingQueueRepository.pushHelper(helperSessionId);
+            synchronized (helperLock) {
+                matchingQueueRepository.pushHelper(helperSessionId);
+                helpersBeingMatched.remove(helperSessionId);
+            }
             messagingTemplate.convertAndSend(
                     "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
@@ -116,6 +135,36 @@ public class MatchingService {
             matchingQueueRepository.pushHelpee(helpeeSessionId);
             matchingQueueRepository.pushHelper(helperSessionId);
         }
+    }
+
+    /**
+     * 도우미(helper)가 스스로 대기열 등록을 취소한다.
+     * 이미 매칭되어 통화 중이면 취소할 수 없고, 애초에 대기열에 없었다면 실패로 처리한다.
+     *
+     * <p>먼저 큐에서 제거를 "시도"하고 그 결과로 판단한다(제거 성공 여부 확인 후 별도로 제거하지 않음).
+     * {@code removeHelper}는 {@link java.util.concurrent.ConcurrentLinkedQueue}의 원자적 CAS 기반이라
+     * {@code popWaitingHelper}(매칭 시도)와 동시에 경합해도 둘 중 하나만 성공하는 것이 보장된다.
+     * 먼저 존재 여부를 확인한 뒤 별도로 제거하면 그 사이에 매칭이 끼어들어
+     * "취소 성공" 응답과 실제 매칭이 동시에 발생하는 경쟁 상태가 생길 수 있다.</p>
+     *
+     * <p>큐에서는 이미 빠졌지만 아직 방이 저장되지 않은 순간(LiveKit 토큰 발급 중)에는
+     * {@code removeHelper}도 실패하고 {@code matchingRoomRepository}에도 없어 자칫 NOT_FOUND로
+     * 오판할 수 있다. 이 구간은 {@link #helpersBeingMatched}로 추적해 ALREADY_IN_CALL로 처리한다
+     * (취소 실패 응답 뒤에 곧바로 MATCHED 알림이 도착하는 모순을 막기 위함).</p>
+     */
+    public void stopHelperWaiting(String helperSessionId) {
+        synchronized (helperLock) {
+            if (matchingQueueRepository.removeHelper(helperSessionId)) {
+                return;
+            }
+            if (helpersBeingMatched.contains(helperSessionId)) {
+                throw new BusinessException(ErrorCode.ALREADY_IN_CALL);
+            }
+        }
+        if (matchingRoomRepository.findBySessionId(helperSessionId).isPresent()) {
+            throw new BusinessException(ErrorCode.ALREADY_IN_CALL);
+        }
+        throw new BusinessException(ErrorCode.NOT_FOUND);
     }
 
     /**
