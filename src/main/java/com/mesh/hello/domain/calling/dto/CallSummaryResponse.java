@@ -7,6 +7,7 @@ import java.time.LocalDateTime;
 public record CallSummaryResponse(
         String roomId,
         String summary,
+        CallSummary.CallCategory category,
         int durationSec,
         LocalDateTime completedAt
 ) {
@@ -15,6 +16,7 @@ public record CallSummaryResponse(
         return new CallSummaryResponse(
                 summary.getRoomId(),
                 summary.getSummary(),
+                summary.getCategory(),
                 summary.getDurationSec(),
                 summary.getCompletedAt()
         );
