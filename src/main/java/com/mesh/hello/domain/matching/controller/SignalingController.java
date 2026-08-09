@@ -35,9 +35,10 @@ public class SignalingController {
         matchingService.endCall(principal.getName(), msg.getRoomId());
     }
 
-    // WebRTC 시그널링 중계 (SDP/ICE)
+    // WebRTC 시그널링 중계 (SDP/ICE) - 발신자가 해당 방의 참가자일 때만 중계
     @MessageMapping("/signal/{roomId}")
-    public void signal(@DestinationVariable String roomId, SignalMessage msg) {
+    public void signal(Principal principal, @DestinationVariable String roomId, SignalMessage msg) {
+        matchingService.assertParticipant(principal.getName(), roomId);
         messagingTemplate.convertAndSend("/api/v1/topic/room/" + roomId, ApiResponse.ok("시그널을 중계합니다.", msg));
     }
 }

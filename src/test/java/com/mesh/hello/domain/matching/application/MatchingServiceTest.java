@@ -391,6 +391,82 @@ class MatchingServiceTest {
 
             verify(pointService, never()).awardCallCompletePoints(any(), anyString());
         }
+
+        @Test
+        @DisplayName("참가자가 아닌 sessionId로 종료를 시도하면 FORBIDDEN_SESSION 예외가 발생하고 방은 유지된다")
+        void endCallByNonParticipantIsForbidden() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+
+            Optional<MatchingRoom> roomOpt = matchingRoomRepository.findBySessionId("helpee-1");
+            assertThat(roomOpt).isPresent();
+            String roomId = roomOpt.get().getRoomId();
+            clearInvocations(messagingTemplate);
+
+            assertThatThrownBy(() -> matchingService.endCall("stranger", roomId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.FORBIDDEN_SESSION);
+
+            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+            assertThat(matchingRoomRepository.findByRoomId(roomId)).isPresent();
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 roomId로 종료를 시도하면 조용히 통과한다(양측 동시 종료 대비)")
+        void endCallOnAlreadyEndedRoomIsNoop() {
+            matchingService.endCall("helpee-1", "no-such-room");
+
+            ArgumentCaptor<Object> endedCaptor = ArgumentCaptor.forClass(Object.class);
+            verify(messagingTemplate).convertAndSend(
+                    eq("/api/v1/topic/room/no-such-room"), endedCaptor.capture()
+            );
+            assertThat(resultOf(endedCaptor.getValue())).isEqualTo(Map.of("type", "ENDED"));
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // assertParticipant
+    // ─────────────────────────────────────────────────────────
+    @Nested
+    @DisplayName("assertParticipant - 방 참가자 검증")
+    class AssertParticipantTest {
+
+        @Test
+        @DisplayName("참가자면 예외 없이 통과한다")
+        void passesForParticipant() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+
+            matchingService.assertParticipant("helpee-1", roomId);
+            matchingService.assertParticipant("helper-1", roomId);
+        }
+
+        @Test
+        @DisplayName("참가자가 아니면 FORBIDDEN_SESSION 예외가 발생한다")
+        void throwsForNonParticipant() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+
+            assertThatThrownBy(() -> matchingService.assertParticipant("stranger", roomId))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.FORBIDDEN_SESSION);
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 roomId면 NOT_FOUND 예외가 발생한다")
+        void throwsForNonExistentRoom() {
+            assertThatThrownBy(() -> matchingService.assertParticipant("helpee-1", "no-such-room"))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.NOT_FOUND);
+        }
     }
 
     // ─────────────────────────────────────────────────────────

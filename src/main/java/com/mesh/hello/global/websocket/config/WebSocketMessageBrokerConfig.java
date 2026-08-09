@@ -3,6 +3,7 @@ package com.mesh.hello.global.websocket.config;
 import com.mesh.hello.global.websocket.interceptor.AnonymousPrincipalChannelInterceptor;
 import com.mesh.hello.global.websocket.interceptor.SessionIdHandshakeInterceptor;
 import com.mesh.hello.global.websocket.interceptor.ShutdownAwareHandshakeInterceptor;
+import com.mesh.hello.global.websocket.interceptor.SubscriptionAuthorizationInterceptor;
 import com.mesh.hello.global.websocket.interceptor.WebSocketRateLimitInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -24,7 +25,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  *   <li>엔드포인트 {@code /api/v1/ws} (SockJS) + 핸드셰이크 인터셉터 2종(종료거부, sessionId 확정)</li>
  *   <li>심플 브로커 {@code /api/v1/topic}, {@code /api/v1/queue} + heartbeat 4000/4000 + 전용 TaskScheduler</li>
  *   <li>애플리케이션 prefix {@code /api/v1}</li>
- *   <li>인바운드 채널 인터셉터: 익명 Principal 등록 → rate limit</li>
+ *   <li>인바운드 채널 인터셉터: 익명 Principal 등록 → 구독 인가 검증 → rate limit</li>
  * </ul>
  */
 @Configuration
@@ -35,6 +36,7 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
     private final SessionIdHandshakeInterceptor sessionIdHandshakeInterceptor;
     private final ShutdownAwareHandshakeInterceptor shutdownAwareHandshakeInterceptor;
     private final AnonymousPrincipalChannelInterceptor anonymousPrincipalChannelInterceptor;
+    private final SubscriptionAuthorizationInterceptor subscriptionAuthorizationInterceptor;
     private final WebSocketRateLimitInterceptor webSocketRateLimitInterceptor;
 
     /** 심플 브로커 heartbeat 전용 스케줄러. */
@@ -64,9 +66,10 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        // 순서 중요: Principal 등록(CONNECT) → rate limit(SEND).
+        // 순서 중요: Principal 등록(CONNECT) → 구독 인가 검증(SUBSCRIBE) → rate limit(SEND).
         registration.interceptors(
             anonymousPrincipalChannelInterceptor,
+            subscriptionAuthorizationInterceptor,
             webSocketRateLimitInterceptor
         );
     }

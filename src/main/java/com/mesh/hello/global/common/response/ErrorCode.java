@@ -19,6 +19,7 @@ public enum ErrorCode {
     ALREADY_IN_CALL(409, "이미 통화 중입니다."),
     NOT_FOUND(404, "대상 룸 또는 요청을 찾을 수 없습니다."),
     INVALID_PAGING(400, "page/size 파라미터가 올바르지 않습니다."),
+    FORBIDDEN_SESSION(403, "본인 소유가 아닌 세션 또는 통화방입니다."),
     SUMMARY_PENDING(202, "요약을 생성하고 있습니다."),
     SUMMARY_FAILED(500, "AI 요약 생성에 실패했습니다."),
 
