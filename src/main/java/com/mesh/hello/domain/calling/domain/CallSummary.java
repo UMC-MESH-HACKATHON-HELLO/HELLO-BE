@@ -1,11 +1,14 @@
 package com.mesh.hello.domain.calling.domain;
 
+import com.fasterxml.jackson.annotation.JsonValue;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
+import java.util.Arrays;
 
 @Entity
 @Getter
@@ -31,6 +34,9 @@ public class CallSummary {
     @Column(columnDefinition = "TEXT")
     private String summary;
 
+    @Enumerated(EnumType.STRING)
+    private CallCategory category;
+
     @Column(nullable = false)
     private int durationSec;
 
@@ -53,10 +59,11 @@ public class CallSummary {
         this.createdAt = LocalDateTime.now();
     }
 
-    /** AI 요약이 완성되면 원문·요약 텍스트를 채우고 COMPLETED로 전환한다. */
-    public void complete(String transcript, String summary) {
+    /** AI 요약이 완성되면 원문·요약 텍스트·도움 카테고리를 채우고 COMPLETED로 전환한다. */
+    public void complete(String transcript, String summary, CallCategory category) {
         this.transcript = transcript;
         this.summary = summary;
+        this.category = category;
         this.status = SummaryStatus.COMPLETED;
         this.completedAt = LocalDateTime.now();
     }
@@ -70,5 +77,35 @@ public class CallSummary {
 
     public enum SummaryStatus {
         PENDING, COMPLETED, FAILED
+    }
+
+    @Slf4j
+    public enum CallCategory {
+        ROAD_GUIDE("길찾기"),
+        SMARTPHONE("스마트폰"),
+        KIOSK("키오스크"),
+        ETC("기타");
+
+        private final String label;
+
+        CallCategory(String label) {
+            this.label = label;
+        }
+
+        @JsonValue
+        public String getLabel() {
+            return label;
+        }
+
+        /** LLM이 반환한 한글 표시값을 enum으로 매핑한다. 매칭되지 않으면 ETC로 fallback한다. */
+        public static CallCategory fromLabel(String label) {
+            return Arrays.stream(values())
+                    .filter(category -> category.label.equals(label))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        log.warn("알 수 없는 category 값: {}", label);
+                        return ETC;
+                    });
+        }
     }
 }
