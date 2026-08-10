@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -78,6 +79,7 @@ public class CallSummary {
         PENDING, COMPLETED, FAILED
     }
 
+    @Slf4j
     public enum CallCategory {
         ROAD_GUIDE("길찾기"),
         SMARTPHONE("스마트폰"),
@@ -100,7 +102,10 @@ public class CallSummary {
             return Arrays.stream(values())
                     .filter(category -> category.label.equals(label))
                     .findFirst()
-                    .orElse(ETC);
+                    .orElseGet(() -> {
+                        log.warn("알 수 없는 category 값: {}", label);
+                        return ETC;
+                    });
         }
     }
 }
