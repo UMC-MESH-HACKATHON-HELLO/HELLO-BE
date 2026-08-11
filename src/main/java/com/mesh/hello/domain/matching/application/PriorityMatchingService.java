@@ -18,6 +18,7 @@ public class PriorityMatchingService {
             String helperSessionId,
             Set<CallSummary.CallCategory> categories
     ) {
+        // 무한루프 방지를 위한 attempt
         for (int attempt = 0; attempt < 3; attempt++) {
 
             Optional<String> helpee =
