@@ -20,11 +20,20 @@ public interface PriorityQueueRepository {
 
     Integer getWaitingHelperCount();
 
-    void pushHelpee(String helpeeSessionId);
+    void pushHelpee(
+            String helpeeSessionId,
+            Set<CallSummary.CallCategory> categories
+    );
 
     Optional<String> popWaitingHelpee();
 
-    void removeHelpee(String helpeeSessionId);
+    Optional<String> peekWaitingHelpee();
+
+    boolean removeHelpee(String helpeeSessionId);
 
     Integer getWaitingHelpeeCount();
+
+    Set<CallSummary.CallCategory> getHelpeeCategories(
+            String helpeeSessionId
+    );
 }

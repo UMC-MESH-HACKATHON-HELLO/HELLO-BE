@@ -14,52 +14,88 @@ public class PriorityMatchingService {
 
     private final PriorityQueueRepository priorityQueueRepository;
 
-    public void registerHelper(
+    public Optional<String> registerHelper(
             String helperSessionId,
             Set<CallSummary.CallCategory> categories
     ) {
+        for (int attempt = 0; attempt < 3; attempt++) {
+
+            Optional<String> helpee =
+                    priorityQueueRepository.peekWaitingHelpee();
+
+            if (helpee.isEmpty()) {
+                break;
+            }
+
+            Set<CallSummary.CallCategory> helpeeCategories =
+                    priorityQueueRepository
+                            .getHelpeeCategories(helpee.get());
+
+            long matchCount = helpeeCategories.stream()
+                    .filter(categories::contains)
+                    .count();
+
+            if (matchCount == 0) {
+                /*
+                 * 현재 가장 오래 기다린 helpee와
+                 * 카테고리가 하나도 맞지 않음.
+                 *
+                 * Helpee FIFO 정책이라면
+                 * 이 helper는 일단 대기열에 들어간다.
+                 */
+                break;
+            }
+
+            if (priorityQueueRepository.removeHelpee(
+                    helpee.get()
+            )) {
+                return helpee;
+            }
+        }
+
         priorityQueueRepository.pushHelper(
                 helperSessionId,
                 categories
         );
+
+        return Optional.empty();
     }
 
     public Optional<String> matchHelper(
+            String helpeeSessionId,
             Set<CallSummary.CallCategory> categories
     ) {
-        Optional<String> helper =
-                priorityQueueRepository.findWaitingHelper(
-                        categories
-                );
+        // 무한루프 방지를 위한 attempt
+        for (int attempt = 0; attempt < 3; attempt++) {
+            Optional<String> helper =
+                    priorityQueueRepository
+                            .findWaitingHelper(
+                                    categories
+                            );
 
-        if (helper.isEmpty()) {
-            return Optional.empty();
+            if (helper.isEmpty()) {
+
+                priorityQueueRepository
+                        .pushHelpee(
+                                helpeeSessionId,
+                                categories
+                        );
+
+                return Optional.empty();
+            }
+
+            if (priorityQueueRepository
+                    .removeHelper(helper.get())) {
+
+                return helper;
+            }
         }
 
-        String helperSessionId =
-                helper.get();
-
-        boolean removed =
-                priorityQueueRepository.removeHelper(
-                        helperSessionId
-                );
-
-        /*
-         * 다른 매칭 요청이 먼저 가져간 경우
-         */
-        if (!removed) {
-            return matchHelper(categories);
-        }
-
-        return Optional.of(helperSessionId);
-    }
-
-    public void registerHelpee(
-            String helpeeSessionId
-    ) {
         priorityQueueRepository.pushHelpee(
-                helpeeSessionId
+                helpeeSessionId,
+                categories
         );
+        return Optional.empty();  // 대기 중인 helper가 없음
     }
 
     public Integer getWaitingHelperCount() {

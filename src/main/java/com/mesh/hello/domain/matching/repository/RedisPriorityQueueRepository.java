@@ -8,6 +8,7 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Repository
 @RequiredArgsConstructor
@@ -17,8 +18,13 @@ public class RedisPriorityQueueRepository
     private static final String HELPER_QUEUE = "matching:helpers";
     private static final String HELPEE_QUEUE = "matching:helpees";
 
+    private static final String HELPER_SEQUENCE = "matching:helpers:sequence";
+    private static final String HELPEE_SEQUENCE = "matching:helpees:sequence";
+
     private static final String HELPER_CATEGORY_PREFIX =
             "matching:helper:categories:";
+    private static final String HELPEE_CATEGORY_PREFIX =
+            "matching:helpees:categories:";
 
     private final StringRedisTemplate redisTemplate;
 
@@ -27,8 +33,8 @@ public class RedisPriorityQueueRepository
             String helperSessionId,
             Set<CallSummary.CallCategory> categories
     ) {
-        long sequence = redisTemplate.opsForZSet()
-                .zCard(HELPER_QUEUE) + 1;
+        long sequence = redisTemplate.opsForValue()
+                        .increment(HELPER_SEQUENCE);
 
         redisTemplate.opsForZSet()
                 .add(
@@ -57,7 +63,7 @@ public class RedisPriorityQueueRepository
             Set<CallSummary.CallCategory> categories
     ) {
         Set<String> helpers = redisTemplate.opsForZSet()
-                .range(HELPER_QUEUE, 0, -1);
+                .range(HELPER_QUEUE, 0, -1);  // ZSET에 있는 모든 데이터를 조회하므로 helper가 많아지면 성능 이슈 발생할 수 있음
 
         if (helpers == null || helpers.isEmpty()) {
             return Optional.empty();
@@ -142,17 +148,8 @@ public class RedisPriorityQueueRepository
             long matchCount,
             double sequence
     ) {
-        /*
-         * 카테고리는 최대 4개.
-         *
-         * matchCount가 1 증가하는 것이
-         * sequence 차이보다 항상 우선되도록
-         * 큰 값을 사용한다.
-         */
-        long priority = 1_000_000_000L;
-
-        return matchCount * priority
-                + (priority - sequence);
+        // 카테고리 일치 우선 + 이후 선착순 (sequence가 그렇게 크지 않다고 가정)
+        return matchCount * 1_000_000_000L - sequence;
     }
 
     @Override
@@ -184,11 +181,13 @@ public class RedisPriorityQueueRepository
     }
 
     @Override
-    public void pushHelpee(String helpeeSessionId) {
+    public void pushHelpee(
+            String helpeeSessionId,
+            Set<CallSummary.CallCategory> categories
+    ) {
 
-        long sequence =
-                redisTemplate.opsForZSet()
-                        .zCard(HELPEE_QUEUE) + 1;
+        Long sequence = redisTemplate.opsForValue()
+                .increment("matching:helpees:sequence");
 
         redisTemplate.opsForZSet()
                 .add(
@@ -196,8 +195,25 @@ public class RedisPriorityQueueRepository
                         helpeeSessionId,
                         sequence
                 );
+
+        String key =
+                HELPEE_CATEGORY_PREFIX + helpeeSessionId;
+
+        redisTemplate.delete(key);
+
+        redisTemplate.opsForSet()
+                .add(
+                        key,
+                        categories.stream()
+                                .map(Enum::name)
+                                .toArray(String[]::new)
+                );
     }
 
+    // 완전한 원자성을 보장하지 X, 추후 개선 필요 (ZRANGE + ZREM)
+    @Deprecated(forRemoval = true, since =
+            "popWaitingHelpee() 대신 peekWaitingHelpee() + removeWaitingHelpee() 사용해주세요."
+    )
     @Override
     public Optional<String> popWaitingHelpee() {
 
@@ -226,13 +242,42 @@ public class RedisPriorityQueueRepository
     }
 
     @Override
-    public void removeHelpee(String helpeeSessionId) {
+    public Optional<String> peekWaitingHelpee() {
 
-        redisTemplate.opsForZSet()
-                .remove(
-                        HELPEE_QUEUE,
-                        helpeeSessionId
-                );
+        Set<String> result =
+                redisTemplate.opsForZSet()
+                        .range(
+                                HELPEE_QUEUE,
+                                0,
+                                0
+                        );
+
+        if (result == null || result.isEmpty()) {
+            return Optional.empty();
+        }
+
+        return result.stream().findFirst();
+    }
+
+    @Override
+    public boolean removeHelpee(String helpeeSessionId) {
+
+        Long removed =
+                redisTemplate.opsForZSet()
+                        .remove(
+                                HELPEE_QUEUE,
+                                helpeeSessionId
+                        );
+
+        if (removed == null || removed == 0) {
+            return false;
+        }
+
+        redisTemplate.delete(
+                HELPEE_CATEGORY_PREFIX + helpeeSessionId
+        );
+
+        return true;
     }
 
     @Override
@@ -246,35 +291,121 @@ public class RedisPriorityQueueRepository
                 ? 0
                 : size.intValue();
     }
+
+    @Override
+    public Set<CallSummary.CallCategory> getHelpeeCategories(
+            String helpeeSessionId
+    ) {
+
+        String key =
+                HELPEE_CATEGORY_PREFIX + helpeeSessionId;
+
+        Set<String> values =
+                redisTemplate.opsForSet()
+                        .members(key);
+
+        if (values == null) {
+            return Set.of();
+        }
+
+        return values.stream()
+                .map(CallSummary.CallCategory::valueOf)
+                .collect(Collectors.toSet());
+    }
 }
 
 /*
--------------------------------- Redis 구조
-waiting:helpers
-    ZSET
-    member = helperSessionId
-    score  = 입장 순서
-
-helper:categories:{sessionId}
-    SET
-    ROAD_GUIDE
-    SMARTPHONE
-    ...
-
-waiting:helpees
-    ZSET
-    member = helpeeSessionId
-    score  = 입장 순서
-
--------------------------------- Redis 임시 ZSET 구조
-matching:{helpeeSessionId}
-    ZSET
-
-    helper1 → 3000000001
-    helper2 → 2000000002
-    helper3 → 3000000003
-
-여기서 앞자리 3은 카테고리 3개 일치, 뒤쪽은 FIFO를 위한 순서값이다.
-
--------------------------------- Redis 임시 ZSET 구조
+ * -------------------------------- Matching 흐름
+ *
+ * Helper 등록
+ *   ↓
+ * helperSessionId + helper의 과거 카테고리
+ *   ↓
+ * PriorityQueueRepository
+ *   ↓
+ * Redis에 대기 helper + 카테고리 저장
+ *
+ *
+ * Helpee 매칭 요청
+ *   ↓
+ * helpee의 요청 카테고리
+ *   ↓
+ * PriorityQueueRepository.findWaitingHelper()
+ *   ↓
+ * 대기 중인 helper들의 과거 카테고리와 비교
+ *   ↓
+ * 카테고리 일치 개수 계산
+ *   ↓
+ * 일치 개수가 많을수록 높은 우선순위
+ *   ↓
+ * 동일한 일치 개수라면 먼저 들어온 helper 우선
+ *   ↓
+ * 가장 적합한 helper 선택
+ *   ↓
+ * PriorityQueueRepository.removeHelper()
+ *   ↓
+ * 제거에 성공하면 매칭 완료
+ *
+ *
+ * -------------------------------- Redis 구조
+ *
+ * matching:helpers
+ *   ZSET
+ *   member = helperSessionId
+ *   score  = helper 대기 순서
+ *
+ * matching:helper:categories:{helperSessionId}
+ *   SET
+ *   = helper가 과거에 처리한 카테고리
+ *
+ * matching:helpees
+ *   ZSET
+ *   member = helpeeSessionId
+ *   score  = helpee 대기 순서
+ *
+ *
+ * -------------------------------- Helper 우선순위
+ *
+ * 현재 helpee의 요청 카테고리와
+ * helper의 과거 카테고리를 비교하여
+ * 일치하는 카테고리의 개수를 계산한다.
+ *
+ * 예:
+ *
+ * Helpee
+ *   ROAD_GUIDE
+ *   SMARTPHONE
+ *   KIOSK
+ *
+ * Helper A
+ *   ROAD_GUIDE
+ *   SMARTPHONE
+ *   KIOSK
+ *   ETC
+ *   → 3개 일치
+ *
+ * Helper B
+ *   ROAD_GUIDE
+ *   ETC
+ *   → 1개 일치
+ *
+ * Helper C
+ *   SMARTPHONE
+ *   KIOSK
+ *   → 2개 일치
+ *
+ * 최종 우선순위:
+ *
+ *   Helper A → Helper C → Helper B
+ *
+ *
+ * -------------------------------- 동시성
+ *
+ * findWaitingHelper()와 removeHelper() 사이에
+ * 다른 매칭 요청이 먼저 helper를 가져갈 수 있다.
+ *
+ * 따라서 removeHelper()의 반환값으로
+ * 실제 선점 성공 여부를 확인한다.
+ *
+ * 제거에 실패하면 다른 helper를 다시 조회한다.
  */
