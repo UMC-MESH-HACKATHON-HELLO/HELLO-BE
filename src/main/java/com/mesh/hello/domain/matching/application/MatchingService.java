@@ -1,14 +1,17 @@
 package com.mesh.hello.domain.matching.application;
 
+import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
 import com.mesh.hello.domain.calling.application.GeminiSummarizationService;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
+import com.mesh.hello.domain.reward.application.PointService;
 import com.mesh.hello.domain.stt.application.TranscribeService;
 import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ApiResponse;
 import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -20,6 +23,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class MatchingService {
@@ -30,6 +34,8 @@ public class MatchingService {
     private final LiveKitService liveKitService;
     private final TranscribeService transcribeService;
     private final GeminiSummarizationService geminiSummarizationService;
+    private final SessionAccountRepository sessionAccountRepository;
+    private final PointService pointService;
 
     /**
      * 큐에서 pop됐지만 아직 방 저장이 끝나지 않은(LiveKit 토큰 발급 중인) helper 세션 집합.
@@ -169,23 +175,58 @@ public class MatchingService {
 
     /**
      * 통화를 정상 종료한다. 방에 있는 양측 모두에게 ENDED를 전송하고 방을 삭제한다.
+     * 로그인된 도우미였다면 통화 완료 포인트를 적립한다.
+     *
+     * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있으므로, 방 제거는
+     * {@link MatchingRoomRepository#deleteByRoomId}의 원자적 제거 결과로 판단해
+     * 둘 중 먼저 제거에 성공한 호출만 포인트 적립과 ENDED 브로드캐스트를 수행한다.</p>
+     *
+     * <p>포인트 적립은 {@code PointHistory.roomId}의 유니크 제약으로 같은 방에 대해
+     * 한 번만 반영되며, 적립이 실패하더라도 ENDED 브로드캐스트는 항상 수행한다.</p>
      */
     public void endCall(String sessionId, String roomId) {
-        matchingRoomRepository.findByRoomId(roomId).ifPresent(room -> {
-            room.markClosing();
-            String transcript = transcribeService.flushTranscript(roomId);
-            int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
-            geminiSummarizationService.markPending(
-                    roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
-            geminiSummarizationService.summarizeAndNotify(
-                    roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
-        });
+        MatchingRoom room = matchingRoomRepository.findByRoomId(roomId).orElse(null);
+        if (room == null) {
+            return;
+        }
+        if (!room.contains(sessionId)) {
+            throw new BusinessException(ErrorCode.ROLE_NOT_ALLOWED);
+        }
+
+        room.markClosing();
+        String transcript = transcribeService.flushTranscript(roomId);
+        int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
+        geminiSummarizationService.markPending(
+                roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
+        geminiSummarizationService.summarizeAndNotify(
+                roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
+
+        if (matchingRoomRepository.deleteByRoomId(roomId).isEmpty()) {
+            return;
+        }
+
+        awardPointsSafely(room.getHelperSessionId(), roomId);
 
         messagingTemplate.convertAndSend(
                 "/api/v1/topic/room/" + roomId,
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
         );
-        matchingRoomRepository.deleteByRoomId(roomId);
+    }
+
+    /**
+     * 로그인된 도우미에게 통화 완료 포인트를 적립한다.
+     *
+     * <p>적립 실패(비로그인, 중복 적립 등)가 ENDED 브로드캐스트를 막지 않도록
+     * 예외를 여기서 흡수한다.</p>
+     */
+    private void awardPointsSafely(String helperSessionId, String roomId) {
+        sessionAccountRepository.findUserId(helperSessionId).ifPresent(helperId -> {
+            try {
+                pointService.awardCallCompletePoints(helperId, roomId);
+            } catch (Exception e) {
+                log.warn("통화 완료 포인트 적립 실패: helperId={}, roomId={}", helperId, roomId, e);
+            }
+        });
     }
 
     /**

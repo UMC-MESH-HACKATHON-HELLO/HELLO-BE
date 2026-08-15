@@ -60,6 +60,9 @@ public class SecurityConfig {
                         .requestMatchers("/", "/error", "/favicon.ico",
                                 "/stomp-test.html", "/livekit-client.umd.min.js", "/h2-console/**").permitAll()
                         // 도우미 전용 (대기 시작/종료·포인트 조회 등은 여기에 추가)
+                        .requestMatchers("/helper/**").authenticated()
+                        // 도우미 포인트 내역 조회
+                        .requestMatchers("/api/v1/helper/points/**").authenticated()
                         .requestMatchers("/api/v1/helper/**").authenticated()
                         // 그 외는 무인증 허용 — 어르신/익명 플로우가 막히면 안 됨
                         .anyRequest().permitAll()

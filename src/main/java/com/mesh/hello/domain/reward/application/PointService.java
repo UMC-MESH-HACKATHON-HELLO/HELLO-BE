@@ -1,0 +1,72 @@
+package com.mesh.hello.domain.reward.application;
+
+import com.mesh.hello.domain.reward.domain.PointHistory;
+import com.mesh.hello.domain.reward.dto.PointHistoryItem;
+import com.mesh.hello.domain.reward.dto.PointHistoryResponse;
+import com.mesh.hello.domain.reward.repository.PointHistoryRepository;
+import com.mesh.hello.domain.user.domain.User;
+import com.mesh.hello.domain.user.repository.UserRepository;
+import com.mesh.hello.global.common.exception.BusinessException;
+import com.mesh.hello.global.common.response.ErrorCode;
+import java.util.List;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * 도우미 포인트 적립/조회.
+ *
+ * <p>적립 내역({@code PointHistory})은 DB에 보관하고, {@code User.points}는
+ * 로그인 응답 등에서 바로 참조할 수 있는 캐시 값으로 함께 갱신한다.</p>
+ */
+@Service
+@RequiredArgsConstructor
+public class PointService {
+
+    /** 통화 1건 정상 종료 시 도우미에게 적립되는 포인트. */
+    private static final long CALL_COMPLETE_POINTS = 10L;
+    private static final String CALL_COMPLETE_REASON = "도움 통화 완료";
+    private static final int MAX_PAGE_SIZE = 100;
+
+    private final PointHistoryRepository pointHistoryRepository;
+    private final UserRepository userRepository;
+
+    /**
+     * 통화 정상 종료 시 도우미에게 포인트를 적립한다.
+     *
+     * <p>{@code User.points}는 find-and-save 대신 원자적 UPDATE로 갱신해, 동시에 여러
+     * 통화가 종료돼도 갱신 유실 없이 반영되도록 한다. 대상 유저가 없으면 내역도 남기지 않는다.</p>
+     */
+    @Transactional
+    public void awardCallCompletePoints(Long helperId, String roomId) {
+        int updated = userRepository.addPoints(helperId, CALL_COMPLETE_POINTS);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.NOT_FOUND);
+        }
+        pointHistoryRepository.save(new PointHistory(helperId, CALL_COMPLETE_POINTS, CALL_COMPLETE_REASON, roomId));
+    }
+
+    @Transactional(readOnly = true)
+    public PointHistoryResponse getPointHistory(String username, int page, int size) {
+        if (page < 0 || size <= 0 || size > MAX_PAGE_SIZE) {
+            throw new BusinessException(ErrorCode.INVALID_PAGING);
+        }
+
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+
+        Pageable pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        Page<PointHistory> histories = pointHistoryRepository.findAllByUserId(user.getId(), pageable);
+        long totalPoints = pointHistoryRepository.sumAmountByUserId(user.getId());
+
+        List<PointHistoryItem> pageItems = histories.stream()
+                .map(PointHistoryItem::from)
+                .toList();
+
+        return new PointHistoryResponse(totalPoints, pageItems);
+    }
+}

@@ -54,7 +54,7 @@ public class User {
     @Column
     private String nickname;
 
-    /** 통화당 적립 포인트. 적립 로직은 이번 범위 아님(필드만 보유). */
+    /** 보유 포인트 총합. 실제 적립/차감 내역은 {@code PointHistory}(DB)로 관리한다. */
     @Column(nullable = false)
     private long points = 0L;
 
