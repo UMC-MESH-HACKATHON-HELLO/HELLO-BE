@@ -13,7 +13,7 @@ public interface PriorityQueueRepository {
     );
 
     Optional<String> findWaitingHelper(
-            Set<CallSummary.CallCategory> categories
+            CallSummary.CallCategory category
     );
 
     boolean removeHelper(String helperSessionId);
@@ -22,7 +22,7 @@ public interface PriorityQueueRepository {
 
     void pushHelpee(
             String helpeeSessionId,
-            Set<CallSummary.CallCategory> categories
+            CallSummary.CallCategory category
     );
 
     Optional<String> popWaitingHelpee();
@@ -33,7 +33,7 @@ public interface PriorityQueueRepository {
 
     Integer getWaitingHelpeeCount();
 
-    Set<CallSummary.CallCategory> getHelpeeCategories(
+    Optional<CallSummary.CallCategory> getHelpeeCategory(
             String helpeeSessionId
     );
 }

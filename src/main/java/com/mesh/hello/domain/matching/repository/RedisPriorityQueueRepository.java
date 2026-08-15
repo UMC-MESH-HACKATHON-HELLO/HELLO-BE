@@ -8,7 +8,6 @@ import org.springframework.stereotype.Repository;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.stream.Collectors;
 
 @Repository
 @RequiredArgsConstructor
@@ -24,7 +23,7 @@ public class RedisPriorityQueueRepository
     private static final String HELPER_CATEGORY_PREFIX =
             "matching:helper:categories:";
     private static final String HELPEE_CATEGORY_PREFIX =
-            "matching:helpees:categories:";
+            "matching:helpee:category:";
 
     private final StringRedisTemplate redisTemplate;
 
@@ -60,7 +59,7 @@ public class RedisPriorityQueueRepository
 
     @Override
     public Optional<String> findWaitingHelper(
-            Set<CallSummary.CallCategory> categories
+            CallSummary.CallCategory category
     ) {
         Set<String> helpers = redisTemplate.opsForZSet()
                 .range(HELPER_QUEUE, 0, -1);  // ZSET에 있는 모든 데이터를 조회하므로 helper가 많아지면 성능 이슈 발생할 수 있음
@@ -81,14 +80,10 @@ public class RedisPriorityQueueRepository
                         redisTemplate.opsForSet()
                                 .members(categoryKey);
 
-                if (helperCategories == null) {
-                    continue;
-                }
-
-                long matchCount = categories.stream()
-                        .map(Enum::name)
-                        .filter(helperCategories::contains)
-                        .count();
+                long matchCount = helperCategories != null
+                        && helperCategories.contains(category.name())
+                        ? 1
+                        : 0;
 
                 /*
                  * score:
@@ -98,10 +93,10 @@ public class RedisPriorityQueueRepository
                  *
                  * 예:
                  *
-                 * matchCount = 3
+                 * matchCount = 1
                  * sequence   = 10
                  *
-                 * score = 3_000_000_000 + (MAX - 10)
+                 * score = 1_000_000_000 - 10
                  */
                 Double sequence =
                         redisTemplate.opsForZSet()
@@ -183,11 +178,11 @@ public class RedisPriorityQueueRepository
     @Override
     public void pushHelpee(
             String helpeeSessionId,
-            Set<CallSummary.CallCategory> categories
+            CallSummary.CallCategory category
     ) {
 
         Long sequence = redisTemplate.opsForValue()
-                .increment("matching:helpees:sequence");
+                .increment(HELPEE_SEQUENCE);
 
         redisTemplate.opsForZSet()
                 .add(
@@ -201,12 +196,10 @@ public class RedisPriorityQueueRepository
 
         redisTemplate.delete(key);
 
-        redisTemplate.opsForSet()
-                .add(
+        redisTemplate.opsForValue()
+                .set(
                         key,
-                        categories.stream()
-                                .map(Enum::name)
-                                .toArray(String[]::new)
+                        category.name()
                 );
     }
 
@@ -237,6 +230,9 @@ public class RedisPriorityQueueRepository
                         HELPEE_QUEUE,
                         helpee
                 );
+        redisTemplate.delete(
+                HELPEE_CATEGORY_PREFIX + helpee
+        );
 
         return Optional.of(helpee);
     }
@@ -293,24 +289,24 @@ public class RedisPriorityQueueRepository
     }
 
     @Override
-    public Set<CallSummary.CallCategory> getHelpeeCategories(
+    public Optional<CallSummary.CallCategory> getHelpeeCategory(
             String helpeeSessionId
     ) {
 
         String key =
                 HELPEE_CATEGORY_PREFIX + helpeeSessionId;
 
-        Set<String> values =
-                redisTemplate.opsForSet()
-                        .members(key);
+        String value =
+                redisTemplate.opsForValue()
+                        .get(key);
 
-        if (values == null) {
-            return Set.of();
+        if (value == null) {
+            return Optional.empty();
         }
 
-        return values.stream()
-                .map(CallSummary.CallCategory::valueOf)
-                .collect(Collectors.toSet());
+        return Optional.of(
+                CallSummary.CallCategory.valueOf(value)
+        );
     }
 }
 
@@ -363,36 +359,38 @@ public class RedisPriorityQueueRepository
  *   member = helpeeSessionId
  *   score  = helpee 대기 순서
  *
+ * matching:helpee:category:{helpeeSessionId}
+ *   STRING
+ *   = helpee가 요청한 단일 카테고리
+ *
  *
  * -------------------------------- Helper 우선순위
  *
  * 현재 helpee의 요청 카테고리와
  * helper의 과거 카테고리를 비교하여
- * 일치하는 카테고리의 개수를 계산한다.
+ * 일치 여부를 계산한다.
  *
  * 예:
  *
  * Helpee
- *   ROAD_GUIDE
  *   SMARTPHONE
- *   KIOSK
  *
  * Helper A
  *   ROAD_GUIDE
  *   SMARTPHONE
  *   KIOSK
  *   ETC
- *   → 3개 일치
+ *   → 일치
  *
  * Helper B
  *   ROAD_GUIDE
  *   ETC
- *   → 1개 일치
+ *   → 불일치
  *
  * Helper C
  *   SMARTPHONE
  *   KIOSK
- *   → 2개 일치
+ *   → 일치
  *
  * 최종 우선순위:
  *

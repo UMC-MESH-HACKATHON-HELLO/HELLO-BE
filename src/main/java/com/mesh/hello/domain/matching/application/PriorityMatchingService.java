@@ -1,6 +1,7 @@
 package com.mesh.hello.domain.matching.application;
 
 import com.mesh.hello.domain.calling.domain.CallSummary;
+import com.mesh.hello.domain.calling.repository.CallSummaryRepository;
 import com.mesh.hello.domain.matching.repository.PriorityQueueRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -13,11 +14,18 @@ import java.util.Set;
 public class PriorityMatchingService {
 
     private final PriorityQueueRepository priorityQueueRepository;
+    private final CallSummaryRepository callSummaryRepository;
 
     public Optional<String> registerHelper(
-            String helperSessionId,
-            Set<CallSummary.CallCategory> categories
+            String helperSessionId
     ) {
+        Set<CallSummary.CallCategory> categories =
+                callSummaryRepository
+                        .findCompletedCategoriesByHelperSessionId(
+                                helperSessionId
+                        );
+
+
         // 무한루프 방지를 위한 attempt
         for (int attempt = 0; attempt < 3; attempt++) {
 
@@ -28,15 +36,20 @@ public class PriorityMatchingService {
                 break;
             }
 
-            Set<CallSummary.CallCategory> helpeeCategories =
+            Optional<CallSummary.CallCategory> helpeeCategory =
                     priorityQueueRepository
-                            .getHelpeeCategories(helpee.get());
+                            .getHelpeeCategory(helpee.get());
 
-            long matchCount = helpeeCategories.stream()
-                    .filter(categories::contains)
-                    .count();
+            if (helpeeCategory.isEmpty()) {
+                if (priorityQueueRepository.removeHelpee(
+                        helpee.get()
+                )) {
+                    continue;
+                }
+                continue;
+            }
 
-            if (matchCount == 0) {
+            if (!categories.contains(helpeeCategory.get())) {
                 /*
                  * 현재 가장 오래 기다린 helpee와
                  * 카테고리가 하나도 맞지 않음.
@@ -64,14 +77,14 @@ public class PriorityMatchingService {
 
     public Optional<String> matchHelper(
             String helpeeSessionId,
-            Set<CallSummary.CallCategory> categories
+            CallSummary.CallCategory category
     ) {
         // 무한루프 방지를 위한 attempt
         for (int attempt = 0; attempt < 3; attempt++) {
             Optional<String> helper =
                     priorityQueueRepository
                             .findWaitingHelper(
-                                    categories
+                                    category
                             );
 
             if (helper.isEmpty()) {
@@ -79,7 +92,7 @@ public class PriorityMatchingService {
                 priorityQueueRepository
                         .pushHelpee(
                                 helpeeSessionId,
-                                categories
+                                category
                         );
 
                 return Optional.empty();
@@ -94,7 +107,7 @@ public class PriorityMatchingService {
 
         priorityQueueRepository.pushHelpee(
                 helpeeSessionId,
-                categories
+                category
         );
         return Optional.empty();  // 대기 중인 helper가 없음
     }
