@@ -36,7 +36,8 @@ public enum ErrorCode {
     KAKAO_USER_INFO_FAILED(502, "카카오 사용자 정보 조회에 실패했습니다."),
 
     INTERNAL_ERROR(500, "서버 내부 오류가 발생했습니다."),
-    NO_HELPER_SEQUENCE(500, "HELPER_SEQUENCE가 존재하지 않습니다.")
+    NO_HELPER_SEQUENCE(500, "HELPER_SEQUENCE가 존재하지 않습니다."),
+    NO_HELPEE_SEQUENCE(500, "HELPEE_SEQUENCE가 존재하지 않습니다.")
     ;
 
     private final int code;

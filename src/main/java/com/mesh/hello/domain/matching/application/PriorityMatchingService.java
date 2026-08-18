@@ -21,24 +21,17 @@ public class PriorityMatchingService {
     private final SessionAccountRepository sessionAccountRepository;
 
     @Transactional
-    public Optional<String> registerHelper(
+    public Optional<MatchedHelpee> registerHelper(
             String helperSessionId
     ) {
 
-        List<CategoryCount> categoryCount;
-
-        Optional<Long> opt = sessionAccountRepository.findUserId(helperSessionId);
-
-        if (opt.isPresent()) categoryCount = callSummaryRepository
-                .findCompletedCategoryCountByHelperId(opt.get());
-        else categoryCount = callSummaryRepository
-                .findCompletedCategoriesByHelperSessionId(helperSessionId);
+        List<CategoryCount> categoryCounts = findHelperCategoryCounts(helperSessionId);
 
         // 무한루프 방지를 위한 attempt
         for (int attempt = 0; attempt < 3; attempt++) {
 
             Optional<String> helpee =
-                    priorityQueueRepository.peekWaitingHelpee();
+                    priorityQueueRepository.findWaitingHelpee(categoryCounts);
 
             if (helpee.isEmpty()) {
                 break;
@@ -49,32 +42,26 @@ public class PriorityMatchingService {
                             .getHelpeeCategory(helpee.get());
 
             if (helpeeCategory.isEmpty()) {
-                if (priorityQueueRepository.removeHelpee(
-                        helpee.get()
-                )) {
-                    continue;
-                }
-                continue;
-            }
 
-            if (categoryCount.contains(new CategoryCount(helpeeCategory.get(), 0L))) {
-                /*
-                 * 현재 가장 오래 기다린 helpee의 카테고리 관련 도움 기록이 없음
-                 * 일단 대기
-                 */
-                break;
+                priorityQueueRepository.removeHelpee(
+                        helpee.get()
+                );
+                continue;
             }
 
             if (priorityQueueRepository.removeHelpee(
                     helpee.get()
             )) {
-                return helpee;
+                return Optional.of(new MatchedHelpee(
+                        helpee.get(),
+                        helpeeCategory.get()
+                ));
             }
         }
 
         priorityQueueRepository.pushHelper(
                 helperSessionId,
-                categoryCount
+                categoryCounts
         );
 
         return Optional.empty();
@@ -115,6 +102,42 @@ public class PriorityMatchingService {
                 category
         );
         return Optional.empty();  // 대기 중인 helper가 없음
+    }
+
+    public void restoreHelper(String helperSessionId) {
+        priorityQueueRepository.pushHelper(
+                helperSessionId,
+                findHelperCategoryCounts(helperSessionId)
+        );
+    }
+
+    public void restoreHelpee(
+            String helpeeSessionId,
+            CallSummary.CallCategory category
+    ) {
+        priorityQueueRepository.pushHelpee(helpeeSessionId, category);
+    }
+
+    public boolean removeWaitingHelper(String helperSessionId) {
+        return priorityQueueRepository.removeHelper(helperSessionId);
+    }
+
+    public void removeWaitingParticipant(String sessionId) {
+        priorityQueueRepository.removeHelper(sessionId);
+        priorityQueueRepository.removeHelpee(sessionId);
+    }
+
+    private List<CategoryCount> findHelperCategoryCounts(String helperSessionId) {
+        return sessionAccountRepository.findUserId(helperSessionId)
+                .map(callSummaryRepository::findCompletedCategoryCountByHelperId)
+                .orElseGet(() -> callSummaryRepository
+                        .findCompletedCategoriesByHelperSessionId(helperSessionId));
+    }
+
+    public record MatchedHelpee(
+            String sessionId,
+            CallSummary.CallCategory category
+    ) {
     }
 
     public Integer getWaitingHelperCount() {

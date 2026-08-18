@@ -6,5 +6,5 @@ public record CategoryCount(
         CallSummary.CallCategory category,
         Long count
 ) {
-
+    public String getLabel() { return category.getLabel(); }
 }

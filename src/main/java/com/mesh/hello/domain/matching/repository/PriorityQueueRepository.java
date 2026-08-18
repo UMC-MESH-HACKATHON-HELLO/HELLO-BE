@@ -26,9 +26,7 @@ public interface PriorityQueueRepository {
             CallSummary.CallCategory category
     );
 
-    Optional<String> popWaitingHelpee();
-
-    Optional<String> peekWaitingHelpee();
+    Optional<String> findWaitingHelpee(List<CategoryCount> categoryCounts);
 
     boolean removeHelpee(String helpeeSessionId);
 

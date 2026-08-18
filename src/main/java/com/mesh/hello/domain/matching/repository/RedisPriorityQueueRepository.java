@@ -6,6 +6,7 @@ import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Repository;
 
 import java.util.*;
@@ -34,18 +35,9 @@ public class RedisPriorityQueueRepository
             String helperSessionId,
             List<CategoryCount> categoryCounts
     ) {
-        long sequence = redisTemplate.opsForValue()
-                        .increment(HELPER_SEQUENCE);
-
-        redisTemplate.opsForZSet()
-                .add(
-                        HELPER_QUEUE,
-                        helperSessionId,
-                        sequence
-                );
-
         String key = HELPER_CATEGORY_PREFIX + helperSessionId;
 
+        redisTemplate.opsForZSet().remove(HELPER_QUEUE, helperSessionId);
         redisTemplate.delete(key);
 
         if (!categoryCounts.isEmpty()) {
@@ -59,87 +51,75 @@ public class RedisPriorityQueueRepository
                             )
             );
         }
+
+        long sequence = redisTemplate.opsForValue()
+                .increment(HELPER_SEQUENCE);
+
+        redisTemplate.opsForZSet()
+                .add(
+                        HELPER_QUEUE,
+                        helperSessionId,
+                        sequence
+                );
     }
 
     @Override
     public Optional<String> findWaitingHelper(
             CallSummary.CallCategory category
     ) {
-        Set<String> helpers = redisTemplate.opsForZSet()
-                .range(HELPER_QUEUE, 0, -1);  // ZSET에 있는 모든 데이터를 조회하므로 helper가 많아지면 성능 이슈 발생할 수 있음
+        Set<ZSetOperations.TypedTuple<String>> helpers = redisTemplate.opsForZSet()
+                .rangeWithScores(HELPER_QUEUE, 0, -1);
 
         if (helpers == null || helpers.isEmpty()) {
             return Optional.empty();
         }
 
-        String tempKey = "matching:temp:" + UUID.randomUUID();
+        String maxSequenceTmp = redisTemplate.opsForValue()
+                .get(HELPER_SEQUENCE);
 
-        try {
-            for (String helper : helpers) {
-
-                String categoryKey =
-                        HELPER_CATEGORY_PREFIX + helper;
-
-                Map<String, Long> categoryCounts =
-                        redisTemplate.opsForHash()
-                                .entries(categoryKey)
-                                .entrySet().stream()
-                                .collect(Collectors.toMap(
-                                        entry -> (String) entry.getKey(),
-                                        entry -> Long.parseLong((String) entry.getValue())
-                                ));
-
-                Double sequence =
-                        redisTemplate.opsForZSet()
-                                .score(
-                                        HELPER_QUEUE,
-                                        helper
-                                );
-
-                String maxSequenceTmp = redisTemplate.opsForValue()
-                        .get(HELPER_SEQUENCE);
-
-                if (maxSequenceTmp == null) throw new BusinessException(ErrorCode.NO_HELPER_SEQUENCE);
-
-                double maxSequence = Double.parseDouble(maxSequenceTmp);
-
-                if (sequence == null) {
-                    continue;
-                }
-
-                double score =
-                        createScore(
-                                categoryCounts,
-                                category.getLabel(),
-                                sequence,
-                                maxSequence
-                        );
-
-                redisTemplate.opsForZSet()
-                        .add(
-                                tempKey,
-                                helper,
-                                score
-                        );
-            }
-
-            Set<String> result =
-                    redisTemplate.opsForZSet()
-                            .reverseRange(
-                                    tempKey,
-                                    0,
-                                    0
-                            );
-
-            if (result == null || result.isEmpty()) {
-                return Optional.empty();
-            }
-
-            return result.stream().findFirst();
-
-        } finally {
-            redisTemplate.delete(tempKey);
+        if (maxSequenceTmp == null) {
+            throw new BusinessException(ErrorCode.NO_HELPER_SEQUENCE);
         }
+
+        double maxSequence = Double.parseDouble(maxSequenceTmp);
+        String selectedHelper = null;
+        double highestScore = Double.NEGATIVE_INFINITY;
+
+        for (ZSetOperations.TypedTuple<String> helperEntry : helpers) {
+            String helper = helperEntry.getValue();
+            Double sequence = helperEntry.getScore();
+
+            if (helper == null || sequence == null) {
+                continue;
+            }
+
+            String categoryKey =
+                    HELPER_CATEGORY_PREFIX + helper;
+
+            Map<String, Long> categoryCounts =
+                    redisTemplate.opsForHash()
+                            .entries(categoryKey)
+                            .entrySet().stream()
+                            .collect(Collectors.toMap(
+                                    entry -> (String) entry.getKey(),
+                                    entry -> Long.parseLong((String) entry.getValue())
+                            ));
+
+            double score =
+                    createScore(
+                            categoryCounts,
+                            category.getLabel(),
+                            sequence,
+                            maxSequence
+                    );
+
+            if (score > highestScore) {
+                highestScore = score;
+                selectedHelper = helper;
+            }
+        }
+
+        return Optional.ofNullable(selectedHelper);
     }
 
     /**
@@ -156,11 +136,13 @@ public class RedisPriorityQueueRepository
             double sequence,
             double maxSequence
     ) {
-        double x = categoryCounts.get(helpeeCategory).doubleValue();
+        double x = categoryCounts.getOrDefault(helpeeCategory, 0L);
         double total = categoryCounts.values().stream()
                 .mapToDouble(Long::doubleValue)
                 .sum();
-        return (x * x + 1) / (total + categoryCounts.size()) * 1000 + (maxSequence - sequence) / maxSequence;
+        return (x * x + 1)
+                / (total + CallSummary.CallCategory.values().length) * 1000
+                + (maxSequence - sequence) / maxSequence;
     }
 
     @Override
@@ -197,7 +179,19 @@ public class RedisPriorityQueueRepository
             CallSummary.CallCategory category
     ) {
 
-        Long sequence = redisTemplate.opsForValue()
+        String key =
+                HELPEE_CATEGORY_PREFIX + helpeeSessionId;
+
+        redisTemplate.opsForZSet().remove(HELPEE_QUEUE, helpeeSessionId);
+        redisTemplate.delete(key);
+
+        redisTemplate.opsForValue()
+                .set(
+                        key,
+                        category.name()
+                );
+
+        long sequence = redisTemplate.opsForValue()
                 .increment(HELPEE_SEQUENCE);
 
         redisTemplate.opsForZSet()
@@ -206,69 +200,68 @@ public class RedisPriorityQueueRepository
                         helpeeSessionId,
                         sequence
                 );
-
-        String key =
-                HELPEE_CATEGORY_PREFIX + helpeeSessionId;
-
-        redisTemplate.delete(key);
-
-        redisTemplate.opsForValue()
-                .set(
-                        key,
-                        category.name()
-                );
-    }
-
-    // 완전한 원자성을 보장하지 X, 추후 개선 필요 (ZRANGE + ZREM)
-    @Deprecated(forRemoval = true, since =
-            "popWaitingHelpee() 대신 peekWaitingHelpee() + removeWaitingHelpee() 사용해주세요."
-    )
-    @Override
-    public Optional<String> popWaitingHelpee() {
-
-        Set<String> result =
-                redisTemplate.opsForZSet()
-                        .range(
-                                HELPEE_QUEUE,
-                                0,
-                                0
-                        );
-
-        if (result == null || result.isEmpty()) {
-            return Optional.empty();
-        }
-
-        String helpee =
-                result.iterator().next();
-
-        redisTemplate.opsForZSet()
-                .remove(
-                        HELPEE_QUEUE,
-                        helpee
-                );
-        redisTemplate.delete(
-                HELPEE_CATEGORY_PREFIX + helpee
-        );
-
-        return Optional.of(helpee);
     }
 
     @Override
-    public Optional<String> peekWaitingHelpee() {
+    public Optional<String> findWaitingHelpee(
+            List<CategoryCount> categoryCounts
+    ) {
+        Set<ZSetOperations.TypedTuple<String>> helpees = redisTemplate.opsForZSet()
+                .rangeWithScores(HELPEE_QUEUE, 0, -1);
 
-        Set<String> result =
-                redisTemplate.opsForZSet()
-                        .range(
-                                HELPEE_QUEUE,
-                                0,
-                                0
-                        );
-
-        if (result == null || result.isEmpty()) {
+        if (helpees == null || helpees.isEmpty()) {
             return Optional.empty();
         }
 
-        return result.stream().findFirst();
+        String maxSequenceTmp = redisTemplate.opsForValue()
+                .get(HELPEE_SEQUENCE);
+
+        if (maxSequenceTmp == null) {
+            throw new BusinessException(ErrorCode.NO_HELPEE_SEQUENCE);
+        }
+
+        Map<String, Long> helperCategoryCounts = categoryCounts.stream()
+                .collect(Collectors.toMap(
+                        CategoryCount::getLabel,
+                        CategoryCount::count
+                ));
+        double maxSequence = Double.parseDouble(maxSequenceTmp);
+        String selectedHelpee = null;
+        double highestScore = Double.NEGATIVE_INFINITY;
+
+        for (ZSetOperations.TypedTuple<String> helpeeEntry : helpees) {
+            String helpee = helpeeEntry.getValue();
+            Double sequence = helpeeEntry.getScore();
+
+            if (helpee == null || sequence == null) {
+                continue;
+            }
+
+            String categoryKey =
+                    HELPEE_CATEGORY_PREFIX + helpee;
+
+            String helpeeCategory =
+                    redisTemplate.opsForValue()
+                            .get(categoryKey);
+            String helpeeCategoryLabel = helpeeCategory == null
+                    ? null
+                    : CallSummary.CallCategory.valueOf(helpeeCategory).getLabel();
+
+            double score =
+                    createScore(
+                            helperCategoryCounts,
+                            helpeeCategoryLabel,
+                            sequence,
+                            maxSequence
+                    );
+
+            if (score > highestScore) {
+                highestScore = score;
+                selectedHelpee = helpee;
+            }
+        }
+
+        return Optional.ofNullable(selectedHelpee);
     }
 
     @Override
@@ -325,101 +318,3 @@ public class RedisPriorityQueueRepository
         );
     }
 }
-
-/*
- * -------------------------------- Matching 흐름
- *
- * Helper 등록
- *   ↓
- * helperSessionId + helper의 과거 카테고리
- *   ↓
- * PriorityQueueRepository
- *   ↓
- * Redis에 대기 helper + 카테고리 저장
- *
- *
- * Helpee 매칭 요청
- *   ↓
- * helpee의 요청 카테고리
- *   ↓
- * PriorityQueueRepository.findWaitingHelper()
- *   ↓
- * 대기 중인 helper들의 과거 카테고리와 비교
- *   ↓
- * 카테고리 일치 개수 계산
- *   ↓
- * 일치 개수가 많을수록 높은 우선순위
- *   ↓
- * 동일한 일치 개수라면 먼저 들어온 helper 우선
- *   ↓
- * 가장 적합한 helper 선택
- *   ↓
- * PriorityQueueRepository.removeHelper()
- *   ↓
- * 제거에 성공하면 매칭 완료
- *
- *
- * -------------------------------- Redis 구조
- *
- * matching:helpers
- *   ZSET
- *   member = helperSessionId
- *   score  = helper 대기 순서
- *
- * matching:helper:categories:{helperSessionId}
- *   SET
- *   = helper가 과거에 처리한 카테고리
- *
- * matching:helpees
- *   ZSET
- *   member = helpeeSessionId
- *   score  = helpee 대기 순서
- *
- * matching:helpee:category:{helpeeSessionId}
- *   STRING
- *   = helpee가 요청한 단일 카테고리
- *
- *
- * -------------------------------- Helper 우선순위
- *
- * 현재 helpee의 요청 카테고리와
- * helper의 과거 카테고리를 비교하여
- * 일치 여부를 계산한다.
- *
- * 예:
- *
- * Helpee
- *   SMARTPHONE
- *
- * Helper A
- *   ROAD_GUIDE
- *   SMARTPHONE
- *   KIOSK
- *   ETC
- *   → 일치
- *
- * Helper B
- *   ROAD_GUIDE
- *   ETC
- *   → 불일치
- *
- * Helper C
- *   SMARTPHONE
- *   KIOSK
- *   → 일치
- *
- * 최종 우선순위:
- *
- *   Helper A → Helper C → Helper B
- *
- *
- * -------------------------------- 동시성
- *
- * findWaitingHelper()와 removeHelper() 사이에
- * 다른 매칭 요청이 먼저 helper를 가져갈 수 있다.
- *
- * 따라서 removeHelper()의 반환값으로
- * 실제 선점 성공 여부를 확인한다.
- *
- * 제거에 실패하면 다른 helper를 다시 조회한다.
- */
