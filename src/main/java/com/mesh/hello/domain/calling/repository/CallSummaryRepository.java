@@ -38,7 +38,10 @@ public interface CallSummaryRepository extends JpaRepository<CallSummary, Long> 
      * 기록이 가장 많은 카테고리만 반환하게 하는게 더 좋을지도
      */
     @Query("""
-            SELECT c.category, COUNT(c)
+            SELECT new com.mesh.hello.domain.matching.dto.CategoryCount(
+                c.category,
+                COUNT(c)
+            )
             FROM CallSummary c
             WHERE c.helperSessionId = :helperSessionId
               AND c.status = :status
@@ -51,7 +54,10 @@ public interface CallSummaryRepository extends JpaRepository<CallSummary, Long> 
     );
 
     @Query("""
-            SELECT c.category, COUNT(c)
+            SELECT new com.mesh.hello.domain.matching.dto.CategoryCount(
+                c.category,
+                COUNT(c)
+            )
             FROM CallSummary c
             WHERE c.helperId = :helperId
               AND c.status = :status
