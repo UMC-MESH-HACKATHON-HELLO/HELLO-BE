@@ -2,6 +2,7 @@ package com.mesh.hello.domain.calling.application;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
 import com.mesh.hello.domain.calling.domain.CallSummary;
 import com.mesh.hello.domain.calling.dto.CallSummaryResponse;
 import com.mesh.hello.domain.calling.repository.CallSummaryRepository;
@@ -19,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestClient;
 
 import java.util.Map;
+import java.util.Optional;
 
 @Slf4j
 @Service
@@ -32,6 +34,7 @@ public class GeminiSummarizationService {
     private final CallSummaryPersistenceService persistenceService;
     private final SimpMessagingTemplate messagingTemplate;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final SessionAccountRepository sessionAccountRepository;
 
     @Value("${gemini.api-key}")
     private String apiKey;
@@ -39,7 +42,15 @@ public class GeminiSummarizationService {
     /** 통화 종료 직후 동기 호출. 요약이 완성되기 전이라도 조회 API가 202를 반환할 수 있도록 PENDING 레코드를 먼저 남긴다. */
     @Transactional
     public void markPending(String roomId, String helpeeSessionId, String helperSessionId, int durationSec) {
-        callSummaryRepository.save(new CallSummary(roomId, helpeeSessionId, helperSessionId, durationSec));
+        // helpeeSessionId가 userId와 바인딩 되어있다면 userId를 함께 저장
+        Optional<Long> userId = sessionAccountRepository.findUserId(helperSessionId);
+        callSummaryRepository.save(CallSummary.builder()
+                .roomId(roomId)
+                .helpeeSessionId(helpeeSessionId)
+                .helperSessionId(helperSessionId)
+                .durationSec(durationSec)
+                .helperId(userId.orElse(null))
+                .build());
     }
 
     @Async
