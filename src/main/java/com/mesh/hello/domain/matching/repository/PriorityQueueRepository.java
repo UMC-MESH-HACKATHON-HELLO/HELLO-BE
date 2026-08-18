@@ -1,15 +1,16 @@
 package com.mesh.hello.domain.matching.repository;
 
 import com.mesh.hello.domain.calling.domain.CallSummary;
+import com.mesh.hello.domain.matching.dto.CategoryCount;
 
+import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 public interface PriorityQueueRepository {
 
     void pushHelper(
             String helperSessionId,
-            Set<CallSummary.CallCategory> categories
+            List<CategoryCount> categoryCounts
     );
 
     Optional<String> findWaitingHelper(

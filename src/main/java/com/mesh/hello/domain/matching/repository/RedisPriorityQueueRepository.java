@@ -1,13 +1,15 @@
 package com.mesh.hello.domain.matching.repository;
 
 import com.mesh.hello.domain.calling.domain.CallSummary;
+import com.mesh.hello.domain.matching.dto.CategoryCount;
+import com.mesh.hello.global.common.exception.BusinessException;
+import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Repository;
 
-import java.util.Optional;
-import java.util.Set;
-import java.util.UUID;
+import java.util.*;
+import java.util.stream.Collectors;
 
 @Repository
 @RequiredArgsConstructor
@@ -30,7 +32,7 @@ public class RedisPriorityQueueRepository
     @Override
     public void pushHelper(
             String helperSessionId,
-            Set<CallSummary.CallCategory> categories
+            List<CategoryCount> categoryCounts
     ) {
         long sequence = redisTemplate.opsForValue()
                         .increment(HELPER_SEQUENCE);
@@ -46,14 +48,16 @@ public class RedisPriorityQueueRepository
 
         redisTemplate.delete(key);
 
-        if (!categories.isEmpty()) {
-            redisTemplate.opsForSet()
-                    .add(
-                            key,
-                            categories.stream()
-                                    .map(Enum::name)
-                                    .toArray(String[]::new)
-                    );
+        if (!categoryCounts.isEmpty()) {
+            categoryCounts.forEach(categoryCount ->
+                    redisTemplate.opsForHash()
+                            .put(
+                                    key,
+                                    categoryCount.category().getLabel(),
+                                    categoryCount.count().toString()
+                                    // String으로 저장 안하면 나중에 조회했을 때 값이 이상하게 나올 수도 있을듯
+                            )
+            );
         }
     }
 
@@ -76,28 +80,15 @@ public class RedisPriorityQueueRepository
                 String categoryKey =
                         HELPER_CATEGORY_PREFIX + helper;
 
-                Set<String> helperCategories =
-                        redisTemplate.opsForSet()
-                                .members(categoryKey);
+                Map<String, Long> categoryCounts =
+                        redisTemplate.opsForHash()
+                                .entries(categoryKey)
+                                .entrySet().stream()
+                                .collect(Collectors.toMap(
+                                        entry -> (String) entry.getKey(),
+                                        entry -> Long.parseLong((String) entry.getValue())
+                                ));
 
-                long matchCount = helperCategories != null
-                        && helperCategories.contains(category.name())
-                        ? 1
-                        : 0;
-
-                /*
-                 * score:
-                 *
-                 * matchCount가 가장 중요
-                 * sequence는 같은 matchCount에서 FIFO 보장
-                 *
-                 * 예:
-                 *
-                 * matchCount = 1
-                 * sequence   = 10
-                 *
-                 * score = 1_000_000_000 - 10
-                 */
                 Double sequence =
                         redisTemplate.opsForZSet()
                                 .score(
@@ -105,12 +96,24 @@ public class RedisPriorityQueueRepository
                                         helper
                                 );
 
+                String maxSequenceTmp = redisTemplate.opsForValue()
+                        .get(HELPER_SEQUENCE);
+
+                if (maxSequenceTmp == null) throw new BusinessException(ErrorCode.NO_HELPER_SEQUENCE);
+
+                double maxSequence = Double.parseDouble(maxSequenceTmp);
+
                 if (sequence == null) {
                     continue;
                 }
 
                 double score =
-                        createScore(matchCount, sequence);
+                        createScore(
+                                categoryCounts,
+                                category.getLabel(),
+                                sequence,
+                                maxSequence
+                        );
 
                 redisTemplate.opsForZSet()
                         .add(
@@ -139,12 +142,25 @@ public class RedisPriorityQueueRepository
         }
     }
 
+    /**
+     * 점수 계산식 : 라플라스 스무딩 + 들어온 순서에 따른 추가 점수 <br>
+     * ( (helpeeCategory 기록 수)<sup>2</sup> + 1) / (전체 기록 수 + 카테고리 수) * 1000 + (maxSequence - sequence) / maxSequence <br>
+     * <ul>
+     * <li>sequence : 들어온 순서 값 (id라고 생각해도 됨)</li>
+     * <li>maxSequence : 맨 마지막 순서 값 (맨 마지막 id 값이라고 생각해도 됨)</li>
+     * </ul>
+     */
     private double createScore(
-            long matchCount,
-            double sequence
+            Map<String, Long> categoryCounts,
+            String helpeeCategory,
+            double sequence,
+            double maxSequence
     ) {
-        // 카테고리 일치 우선 + 이후 선착순 (sequence가 그렇게 크지 않다고 가정)
-        return matchCount * 1_000_000_000L - sequence;
+        double x = categoryCounts.get(helpeeCategory).doubleValue();
+        double total = categoryCounts.values().stream()
+                .mapToDouble(Long::doubleValue)
+                .sum();
+        return (x * x + 1) / (total + categoryCounts.size()) * 1000 + (maxSequence - sequence) / maxSequence;
     }
 
     @Override

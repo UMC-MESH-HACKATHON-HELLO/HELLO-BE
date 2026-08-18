@@ -1,13 +1,16 @@
 package com.mesh.hello.domain.matching.application;
 
+import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
 import com.mesh.hello.domain.calling.domain.CallSummary;
 import com.mesh.hello.domain.calling.repository.CallSummaryRepository;
+import com.mesh.hello.domain.matching.dto.CategoryCount;
 import com.mesh.hello.domain.matching.repository.PriorityQueueRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Optional;
-import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -15,16 +18,21 @@ public class PriorityMatchingService {
 
     private final PriorityQueueRepository priorityQueueRepository;
     private final CallSummaryRepository callSummaryRepository;
+    private final SessionAccountRepository sessionAccountRepository;
 
+    @Transactional
     public Optional<String> registerHelper(
             String helperSessionId
     ) {
-        Set<CallSummary.CallCategory> categories =
-                callSummaryRepository
-                        .findCompletedCategoriesByHelperSessionId(
-                                helperSessionId
-                        );
 
+        List<CategoryCount> categoryCount;
+
+        Optional<Long> opt = sessionAccountRepository.findUserId(helperSessionId);
+
+        if (opt.isPresent()) categoryCount = callSummaryRepository
+                .findCompletedCategoryCountByHelperId(opt.get());
+        else categoryCount = callSummaryRepository
+                .findCompletedCategoriesByHelperSessionId(helperSessionId);
 
         // 무한루프 방지를 위한 attempt
         for (int attempt = 0; attempt < 3; attempt++) {
@@ -49,13 +57,10 @@ public class PriorityMatchingService {
                 continue;
             }
 
-            if (!categories.contains(helpeeCategory.get())) {
+            if (categoryCount.contains(new CategoryCount(helpeeCategory.get(), 0L))) {
                 /*
-                 * 현재 가장 오래 기다린 helpee와
-                 * 카테고리가 하나도 맞지 않음.
-                 *
-                 * Helpee FIFO 정책이라면
-                 * 이 helper는 일단 대기열에 들어간다.
+                 * 현재 가장 오래 기다린 helpee의 카테고리 관련 도움 기록이 없음
+                 * 일단 대기
                  */
                 break;
             }
@@ -69,7 +74,7 @@ public class PriorityMatchingService {
 
         priorityQueueRepository.pushHelper(
                 helperSessionId,
-                categories
+                categoryCount
         );
 
         return Optional.empty();
