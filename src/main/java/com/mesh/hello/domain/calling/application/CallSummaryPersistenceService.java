@@ -13,9 +13,10 @@ public class CallSummaryPersistenceService {
     private final CallSummaryRepository callSummaryRepository;
 
     @Transactional
-    public void completeSummary(CallSummary pending, String transcript, String summaryText) {
+    public void completeSummary(CallSummary pending, String transcript, String summaryText,
+                                 CallSummary.CallCategory category) {
         if (pending != null) {
-            pending.complete(transcript, summaryText);
+            pending.complete(transcript, summaryText, category);
             callSummaryRepository.save(pending);
         }
     }

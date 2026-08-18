@@ -54,7 +54,8 @@ public class GeminiSummarizationService {
 
         if (transcript == null || transcript.isBlank()) {
             log.info("요약 생략 — 텍스트 없음 (room: {})", roomId);
-            persistenceService.completeSummary(pending, null, "통화 내용이 없어 요약을 생성하지 않았습니다.");
+            persistenceService.completeSummary(pending, null, "통화 내용이 없어 요약을 생성하지 않았습니다.",
+                    CallSummary.CallCategory.ETC);
             return;
         }
 
@@ -62,6 +63,7 @@ public class GeminiSummarizationService {
         String providedHelp;
         String result;
         String summaryText;
+        CallSummary.CallCategory category;
 
         try {
             JsonNode summary = callGemini(transcript);
@@ -69,6 +71,7 @@ public class GeminiSummarizationService {
             requestedHelp = summary.path("requestedHelp").asText();
             providedHelp  = summary.path("providedHelp").asText();
             result        = summary.path("result").asText();
+            category      = CallSummary.CallCategory.fromLabel(summary.path("category").asText());
             summaryText   = "요청: %s\n제공된 도움: %s\n결과: %s"
                     .formatted(requestedHelp, providedHelp, result);
 
@@ -78,7 +81,7 @@ public class GeminiSummarizationService {
             return;
         }
 
-        persistenceService.completeSummary(pending, transcript, summaryText);
+        persistenceService.completeSummary(pending, transcript, summaryText, category);
 
         // 도우미: 전체 요약
         messagingTemplate.convertAndSend(
@@ -155,11 +158,13 @@ public class GeminiSummarizationService {
                 - requestedHelp: 어르신이 요청한 도움을 한 문장으로 간결하게 작성하세요.
                 - providedHelp: 어르신이 직접 읽을 메뉴얼입니다. 각 단계를 짧고 명확한 행동 지시문으로 작성하세요. "~하기", "~누르기", "~선택" 같은 형식으로 10단어 이내로 작성하세요. 설명체(~했습니다, ~안내드렸습니다)는 절대 사용하지 마세요.
                 - result: "해결" 또는 "미해결" 중 하나로만 작성하세요.
+                - category: 통화 내용이 어떤 도움 요청에 해당하는지 "길찾기", "스마트폰", "키오스크", "기타" 중 하나로만 분류하세요. 위치·이동 안내는 길찾기, 휴대폰 사용법은 스마트폰, 무인 단말기 사용법은 키오스크, 그 외는 기타로 분류하세요.
 
                 {
                   "requestedHelp": "어르신이 요청한 도움 내용",
                   "providedHelp": "1. 행동 지시\\n2. 행동 지시\\n3. 행동 지시\\n...",
-                  "result": "해결 또는 미해결"
+                  "result": "해결 또는 미해결",
+                  "category": "길찾기 또는 스마트폰 또는 키오스크 또는 기타"
                 }
                 """.formatted(transcript);
     }

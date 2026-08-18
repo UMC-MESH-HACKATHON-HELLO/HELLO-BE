@@ -1,4 +1,4 @@
-INSERT INTO policies (type, title, content, version, effective_date, created_at, updated_at) VALUES
+INSERT IGNORE INTO policies (type, title, content, version, effective_date, created_at, updated_at) VALUES
 ('TERMS', '이용약관', '제1조(목적)
 이 약관은 팀 여보세요(이하 "회사")가 제공하는 실시간 음성 도움 매칭 서비스 "여보세요"(이하 "서비스")의 이용과 관련하여 회사와 이용자의 권리, 의무 및 책임사항을 정함을 목적으로 합니다.
 
