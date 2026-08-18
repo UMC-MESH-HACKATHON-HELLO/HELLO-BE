@@ -24,7 +24,7 @@ class CallSummaryPersistenceServiceTest {
     @DisplayName("completeSummary - category를 포함해 요약을 완료 처리하고 저장한다")
     void completeSummary_savesWithCategory() {
         persistenceService = new CallSummaryPersistenceService(callSummaryRepository);
-        CallSummary pending = new CallSummary("room-1", "helpee-1", "helper-1", 90);
+        CallSummary pending = new CallSummary("room-1", "helpee-1", "helper-1", 1L, 90);
 
         persistenceService.completeSummary(pending, "transcript", "summary text", CallSummary.CallCategory.KIOSK);
 

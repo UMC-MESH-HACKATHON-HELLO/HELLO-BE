@@ -196,8 +196,9 @@ public class MatchingService {
         room.markClosing();
         String transcript = transcribeService.flushTranscript(roomId);
         int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
+        Long helperId = sessionAccountRepository.findUserId(room.getHelperSessionId()).orElse(null);
         geminiSummarizationService.markPending(
-                roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
+                roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), helperId, durationSec);
         geminiSummarizationService.summarizeAndNotify(
                 roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
 
@@ -241,8 +242,9 @@ public class MatchingService {
             room.markClosing();
             String transcript = transcribeService.flushTranscript(room.getRoomId());
             int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
+            Long helperId = sessionAccountRepository.findUserId(room.getHelperSessionId()).orElse(null);
             geminiSummarizationService.markPending(
-                    room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
+                    room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), helperId, durationSec);
             geminiSummarizationService.summarizeAndNotify(
                     room.getRoomId(), room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
 

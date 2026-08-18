@@ -38,8 +38,8 @@ public class GeminiSummarizationService {
 
     /** 통화 종료 직후 동기 호출. 요약이 완성되기 전이라도 조회 API가 202를 반환할 수 있도록 PENDING 레코드를 먼저 남긴다. */
     @Transactional
-    public void markPending(String roomId, String helpeeSessionId, String helperSessionId, int durationSec) {
-        callSummaryRepository.save(new CallSummary(roomId, helpeeSessionId, helperSessionId, durationSec));
+    public void markPending(String roomId, String helpeeSessionId, String helperSessionId, Long helperId, int durationSec) {
+        callSummaryRepository.save(new CallSummary(roomId, helpeeSessionId, helperSessionId, helperId, durationSec));
     }
 
     @Async

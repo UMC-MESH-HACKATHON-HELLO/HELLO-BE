@@ -53,7 +53,7 @@ class GeminiSummarizationServiceTest {
                 geminiRestClient, callSummaryRepository, persistenceService, messagingTemplate);
         ReflectionTestUtils.setField(service, "apiKey", "test-api-key");
 
-        pending = new CallSummary("room-1", "helpee-1", "helper-1", 120);
+        pending = new CallSummary("room-1", "helpee-1", "helper-1", 1L, 120);
         given(callSummaryRepository.findTopByRoomIdOrderByIdDesc("room-1")).willReturn(Optional.of(pending));
     }
 

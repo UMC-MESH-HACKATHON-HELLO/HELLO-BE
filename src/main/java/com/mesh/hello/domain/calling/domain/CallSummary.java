@@ -28,6 +28,9 @@ public class CallSummary {
     @Column(nullable = false)
     private String helperSessionId;
 
+    /** 통화 종료 시점에 helperSessionId로 resolve된 로그인 유저 id. 비로그인 등으로 resolve 실패 시 null. */
+    private Long helperId;
+
     @Column(columnDefinition = "TEXT")
     private String transcript;
 
@@ -50,10 +53,11 @@ public class CallSummary {
     private LocalDateTime completedAt;
 
     /** 통화 종료 직후, AI 요약이 완성되기 전 PENDING 상태로 먼저 저장한다. */
-    public CallSummary(String roomId, String helpeeSessionId, String helperSessionId, int durationSec) {
+    public CallSummary(String roomId, String helpeeSessionId, String helperSessionId, Long helperId, int durationSec) {
         this.roomId = roomId;
         this.helpeeSessionId = helpeeSessionId;
         this.helperSessionId = helperSessionId;
+        this.helperId = helperId;
         this.durationSec = durationSec;
         this.status = SummaryStatus.PENDING;
         this.createdAt = LocalDateTime.now();
