@@ -33,7 +33,7 @@ public class ForbiddenWordDetection {
     @Column(nullable = false)
     private String matchedWord;
 
-    @Column(nullable = false, length = 1000)
+    @Column(nullable = false, columnDefinition = "TEXT")
     private String utterance;
 
     @Column(nullable = false)
