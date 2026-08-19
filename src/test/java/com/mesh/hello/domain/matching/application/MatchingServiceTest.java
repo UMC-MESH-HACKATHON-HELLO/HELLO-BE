@@ -398,6 +398,27 @@ class MatchingServiceTest {
 
             verify(pointService, never()).awardCallCompletePoints(any(), anyString());
         }
+
+        @Test
+        @DisplayName("다른 종료 경로(예: 금지어 강제 종료)가 이미 방을 선점했다면 endCall은 아무 것도 하지 않는다")
+        void skipsWhenRoomAlreadyClosedByAnotherPath() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+            // 다른 종료 경로가 먼저 CAS를 선점한 상황을 재현한다.
+            matchingRoomRepository.findByRoomId(roomId).get().markClosing();
+            clearInvocations(messagingTemplate);
+
+            matchingService.endCall("helpee-1", roomId);
+
+            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+            verify(geminiSummarizationService, never()).summarizeAndNotify(any(), any(), any(), any());
+            verify(pointService, never()).awardCallCompletePoints(any(), anyString());
+            // 방 삭제는 선점한 경로의 책임이므로 이 호출은 건드리지 않는다.
+            assertThat(matchingRoomRepository.findByRoomId(roomId)).isPresent();
+        }
     }
 
     // ─────────────────────────────────────────────────────────
@@ -517,6 +538,25 @@ class MatchingServiceTest {
             );
             assertThat(resultOf(partnerCaptor.getValue())).isEqualTo(Map.of("type", "PARTNER_DISCONNECTED"));
             assertThat(matchingRoomRepository.findBySessionId("helpee-1")).isEmpty();
+        }
+
+        @Test
+        @DisplayName("다른 종료 경로(예: 금지어 강제 종료)가 이미 방을 선점했다면 handleDisconnect는 아무 것도 하지 않는다")
+        void skipsWhenRoomAlreadyClosedByAnotherPath() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), eq("helpee-1"))).willReturn("t1");
+            given(liveKitService.createToken(anyString(), eq("helper-1"))).willReturn("t2");
+            matchingService.requestMatch("helpee-1");
+
+            String roomId = matchingRoomRepository.findBySessionId("helper-1").get().getRoomId();
+            matchingRoomRepository.findByRoomId(roomId).get().markClosing();
+            clearInvocations(messagingTemplate);
+
+            matchingService.handleDisconnect("helper-1");
+
+            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+            verify(geminiSummarizationService, never()).summarizeAndNotify(any(), any(), any(), any());
+            assertThat(matchingRoomRepository.findByRoomId(roomId)).isPresent();
         }
     }
 }

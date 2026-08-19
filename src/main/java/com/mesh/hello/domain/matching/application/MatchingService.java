@@ -182,9 +182,11 @@ public class MatchingService {
      * 통화를 정상 종료한다. 방에 있는 양측 모두에게 ENDED를 전송하고 방을 삭제한다.
      * 로그인된 도우미였다면 통화 완료 포인트를 적립한다.
      *
-     * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있으므로, 방 제거는
-     * {@link MatchingRoomRepository#deleteByRoomId}의 원자적 제거 결과로 판단해
-     * 둘 중 먼저 제거에 성공한 호출만 포인트 적립과 ENDED 브로드캐스트를 수행한다.</p>
+     * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있고, 금지어 감지로 인한 강제 종료
+     * ({@link #onForbiddenWordDetected})와도 경합할 수 있으므로 {@link MatchingRoom#markClosing()}의
+     * CAS 결과로 오직 하나의 종료 경로만 진행되도록 한다. 이미 다른 경로가 선점했다면 그쪽이 방 삭제와
+     * 브로드캐스트까지 책임지므로 여기서는 조용히 반환한다(그 대신 {@code deleteByRoomId}는 남겨
+     * 방어적으로 이중 체크한다).</p>
      *
      * <p>포인트 적립은 {@code PointHistory.roomId}의 유니크 제약으로 같은 방에 대해
      * 한 번만 반영되며, 적립이 실패하더라도 ENDED 브로드캐스트는 항상 수행한다.</p>
@@ -197,8 +199,10 @@ public class MatchingService {
         if (!room.contains(sessionId)) {
             throw new BusinessException(ErrorCode.ROLE_NOT_ALLOWED);
         }
+        if (!room.markClosing()) {
+            return;
+        }
 
-        room.markClosing();
         String transcript = transcribeService.flushTranscript(roomId);
         int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
         geminiSummarizationService.markPending(
@@ -275,13 +279,19 @@ public class MatchingService {
     /**
      * 세션 연결이 끊겼을 때 정리 작업을 수행한다.
      * 대기열에서 제거하고, 통화 중이었다면 상대방에게 PARTNER_DISCONNECTED를 전송한다.
+     *
+     * <p>{@link #endCall}과 마찬가지로 {@link MatchingRoom#markClosing()}으로 다른 종료 경로
+     * (정상 종료, 금지어 강제 종료)와의 경합을 가른다. 이미 선점됐다면 그쪽이 정리를 책임지므로
+     * 여기서는 아무 것도 하지 않는다.</p>
      */
     public void handleDisconnect(String sessionId) {
         matchingQueueRepository.removeHelper(sessionId);
         matchingQueueRepository.removeHelpee(sessionId);
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
-            room.markClosing();
+            if (!room.markClosing()) {
+                return;
+            }
             String transcript = transcribeService.flushTranscript(room.getRoomId());
             int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
             geminiSummarizationService.markPending(
