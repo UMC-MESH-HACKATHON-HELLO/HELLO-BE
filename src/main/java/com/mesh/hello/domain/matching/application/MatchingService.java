@@ -17,6 +17,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -229,7 +230,16 @@ public class MatchingService {
      * <p>정상 종료({@link #endCall})와 달리 Gemini 요약은 생성하지 않고(금지어가 섞인 대화를
      * 요약에 노출하지 않기 위함), 포인트도 적립하지 않는다. 양측에는 ENDED가 아닌 FORCE_ENDED를
      * 전송해 강제 종료임을 구분한다.</p>
+     *
+     * <p>Spring의 이벤트 발행은 기본적으로 동기이므로, 이 리스너는 이벤트를 발행한
+     * {@code TranscribeService}의 OkHttp WebSocket 리더 스레드에서 그대로 실행된다.
+     * {@link #transcribeService}.flushTranscript()가 바로 그 세션 자신의 onClosed 콜백을
+     * 최대 3초간 기다리는데, 그 콜백을 처리해야 할 리더 스레드가 이미 여기 묶여 있으면
+     * 매번 타임아웃까지 지연돼 "실시간 강제 종료"가 무색해진다. {@code @Async}로 별도 스레드에서
+     * 실행해 리더 스레드를 즉시 풀어준다({@link GeminiSummarizationService#summarizeAndNotify}와
+     * 동일한 패턴, {@code @EnableAsync}는 {@code HelloApplication}에 설정돼 있음).</p>
      */
+    @Async
     @EventListener
     public void onForbiddenWordDetected(ForbiddenWordDetectedEvent event) {
         MatchingRoom room = matchingRoomRepository.findByRoomId(event.roomId()).orElse(null);
