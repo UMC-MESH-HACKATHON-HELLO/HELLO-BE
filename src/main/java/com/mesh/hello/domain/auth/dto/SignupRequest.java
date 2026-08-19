@@ -31,7 +31,7 @@ public class SignupRequest {
     @Pattern(regexp = "^[a-zA-Z0-9_]{3,20}$", message = "INVALID_USERNAME_FORMAT")
     private String username;
 
-    /** 영문+숫자를 모두 포함한 8~20자. */
+    /** 영문+숫자를 모두 포함한 8~20자. 특수문자는 선택. */
     @NotBlank(message = "INVALID_PASSWORD_FORMAT")
     @Pattern(regexp = "^(?=.*[a-zA-Z])(?=.*[0-9]).{8,20}$", message = "INVALID_PASSWORD_FORMAT")
     private String password;
