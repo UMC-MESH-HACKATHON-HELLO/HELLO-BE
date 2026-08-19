@@ -27,7 +27,7 @@ public class UserService {
     /** 로그인된 도우미 본인 정보 조회(인증 principal의 username 기준). */
     @Transactional(readOnly = true)
     public HelperInfoResponse getMyInfo(String username) {
-        User user = userRepository.findByUsername(username)
+        User user = userRepository.findByUsernameAndDeletedFalse(username)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
         return new HelperInfoResponse(user.getId(), user.getUsername(), user.getNickname(), user.getPoints());
     }
@@ -36,15 +36,15 @@ public class UserService {
      * username 기반 회원 탈퇴 — 컨트롤러에서 Principal.getName()으로 호출하는 진입점.
      *
      * <p>username → userId 변환 후 {@link #withdraw(Long)}에 위임한다.
-     * deleted = true인 계정은 {@code findByUsername}으로 조회되지 않으므로
-     * {@link ErrorCode#UNAUTHORIZED}를 먼저 던지고, 이후 {@link #withdraw}에서
+     * deleted = true인 계정은 {@code findByUsernameAndDeletedFalse}가 empty를 반환하므로
+     * {@link ErrorCode#UNAUTHORIZED}를 던진다. 이후 {@link #withdraw}에서
      * {@link ErrorCode#ALREADY_WITHDRAWN}을 추가로 방어한다.</p>
      *
      * @param username 현재 로그인 세션의 username (Principal.getName() 값)
      */
     @Transactional
     public void withdrawByUsername(String username) {
-        User user = userRepository.findByUsername(username)
+        User user = userRepository.findByUsernameAndDeletedFalse(username)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
         withdraw(user.getId());
     }
