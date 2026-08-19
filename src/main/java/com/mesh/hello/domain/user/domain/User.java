@@ -13,7 +13,6 @@ import jakarta.persistence.Table;
 import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDateTime;
 import lombok.AccessLevel;
-import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 
@@ -122,25 +121,8 @@ public class User extends BaseEntity {
 
     // ── 생성자 / 팩토리 메서드 ────────────────────────────────────────────────
 
-    /** LOCAL 회원가입용 빌더. provider = LOCAL, providerId = null. */
-    @Builder
-    public User(String username, String password, String nickname) {
-        this.username = username;
-        this.password = password;
-        this.nickname = nickname;
-        this.points = 0L;
-        this.provider = Provider.LOCAL;
-        this.providerId = null;
-        this.deleted = false;
-        this.privacyAgreed = false;
-    }
-
     /**
      * LOCAL 회원가입용 정적 팩토리 메서드.
-     *
-     * <p>{@link #User(String, String, String) @Builder} 생성자가 email·privacyAgreed를
-     * 받지 않으므로, B2 이후 로컬 가입 시에는 이 메서드를 사용한다.
-     * 기존 {@code @Builder} 생성자는 AuthService와의 하위 호환을 위해 유지한다.</p>
      *
      * @param username        내부 로그인 식별자
      * @param encodedPassword BCrypt 해시 비밀번호(평문 금지)

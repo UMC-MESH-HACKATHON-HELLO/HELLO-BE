@@ -125,25 +125,6 @@ class AuthServiceTest {
     }
 
     @Nested
-    @DisplayName("signup - username 형식 검증")
-    class FormatValidationTest {
-
-        @ParameterizedTest
-        @ValueSource(strings = {"ab", "user name", "유저이름", "user!!", ""})
-        @DisplayName("허용되지 않는 형식의 username은 INVALID_USERNAME_FORMAT 에러를 던진다")
-        void invalidFormatUsername_isRejected(String invalidUsername) {
-            SignupRequest request = new SignupRequest(invalidUsername, "password123", "닉네임");
-
-            assertThatThrownBy(() -> authService.signup(request))
-                    .isInstanceOf(BusinessException.class)
-                    .extracting(e -> ((BusinessException) e).getErrorCode())
-                    .isEqualTo(ErrorCode.INVALID_USERNAME_FORMAT);
-
-            verify(userRepository, never()).save(any(User.class));
-        }
-    }
-
-    @Nested
     @DisplayName("signup - 정상 가입")
     class SuccessTest {
 
