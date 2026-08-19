@@ -40,9 +40,6 @@ public class AuthService {
     /** 익명 sessionId를 전달받는 키(요청 헤더 / HttpSession 속성 공통). */
     private static final String SESSION_ID_KEY = "sessionId";
 
-    /** 로컬 회원가입 username 허용 형식: 영문/숫자/언더스코어 3~20자. */
-    private static final String USERNAME_FORMAT = "^[a-zA-Z0-9_]{3,20}$";
-
     private final AuthenticationManager authenticationManager;
     private final SecurityContextRepository securityContextRepository;
     private final UserRepository userRepository;
@@ -84,7 +81,11 @@ public class AuthService {
     }
 
     /**
-     * 최소 회원가입(범위 밖이지만 시연용). username 형식 검증 + 중복 체크 + BCrypt 저장.
+     * 로컬 회원가입. 입력값 정규화 → kakao_ 접두사 차단 → 중복 검사 → 저장.
+     *
+     * <p>username 형식 검증(영문/숫자/언더스코어 3~20자)은 {@link SignupRequest}의
+     * Bean Validation(@Pattern)으로 컨트롤러 레이어에서 사전 차단된다.
+     * 서비스에는 @Valid로 표현하기 어려운 {@code kakao_} 예약어 차단만 남긴다.</p>
      *
      * <p>{@code kakao_} 접두사는 {@link KakaoOAuthService}가 소셜 유저의 내부 username을
      * {@code kakao_<providerId>} 형태로 결정적으로 생성하는 데 사용하는 예약어다.
@@ -99,12 +100,10 @@ public class AuthService {
      */
     @Transactional
     public Long signup(SignupRequest request) {
-        String username = request.username();
-        if (username == null || !username.matches(USERNAME_FORMAT)) {
-            throw new BusinessException(ErrorCode.INVALID_USERNAME_FORMAT);
-        }
+        String username = request.username() != null ? request.username().trim() : null;
+
         // regionMatches(ignoreCase=true)로 대소문자 변형(KAKAO_, KaKaO_ 등)을 모두 차단
-        if (username.regionMatches(true, 0,
+        if (username != null && username.regionMatches(true, 0,
                 KakaoOAuthService.USERNAME_PREFIX, 0,
                 KakaoOAuthService.USERNAME_PREFIX.length())) {
             throw new BusinessException(ErrorCode.RESERVED_USERNAME_PREFIX);
@@ -112,11 +111,20 @@ public class AuthService {
         if (userRepository.existsByUsername(username)) {
             throw new BusinessException(ErrorCode.DUPLICATE_USERNAME);
         }
-        User user = User.builder()
-                .username(username)
-                .password(passwordEncoder.encode(request.password()))
-                .nickname(request.nickname())
-                .build();
+
+        // email 정규화: trim + 소문자 (대소문자만 다른 중복 가입 방지)
+        String email = request.email() != null ? request.email().trim().toLowerCase() : null;
+        if (email != null && userRepository.existsByEmail(email)) {
+            throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
+        }
+
+        User user = User.createLocal(
+                username,
+                passwordEncoder.encode(request.password()),
+                request.nickname(),
+                email,
+                Boolean.TRUE.equals(request.privacyAgreed())
+        );
         return userRepository.save(user).getId();
     }
 

@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -48,7 +49,7 @@ public class AuthController {
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "중복 username")
     })
     @PostMapping("/signup")
-    public ApiResponse<Long> signup(@RequestBody SignupRequest request) {
+    public ApiResponse<Long> signup(@Valid @RequestBody SignupRequest request) {
         return ApiResponse.ok("회원가입이 완료되었습니다.", authService.signup(request));
     }
 }
