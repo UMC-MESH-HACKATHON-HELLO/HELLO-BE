@@ -33,6 +33,23 @@ public class UserService {
     }
 
     /**
+     * username 기반 회원 탈퇴 — 컨트롤러에서 Principal.getName()으로 호출하는 진입점.
+     *
+     * <p>username → userId 변환 후 {@link #withdraw(Long)}에 위임한다.
+     * deleted = true인 계정은 {@code findByUsername}으로 조회되지 않으므로
+     * {@link ErrorCode#UNAUTHORIZED}를 먼저 던지고, 이후 {@link #withdraw}에서
+     * {@link ErrorCode#ALREADY_WITHDRAWN}을 추가로 방어한다.</p>
+     *
+     * @param username 현재 로그인 세션의 username (Principal.getName() 값)
+     */
+    @Transactional
+    public void withdrawByUsername(String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+        withdraw(user.getId());
+    }
+
+    /**
      * 회원 탈퇴 처리 (소프트 삭제 + 개인정보 익명화).
      *
      * <p>탈퇴 순서:
