@@ -41,15 +41,13 @@ public class RedisPriorityQueueRepository
         redisTemplate.delete(key);
 
         if (!categoryCounts.isEmpty()) {
-            categoryCounts.forEach(categoryCount ->
-                    redisTemplate.opsForHash()
-                            .put(
-                                    key,
-                                    categoryCount.category().getLabel(),
-                                    categoryCount.count().toString()
-                                    // String으로 저장 안하면 나중에 조회했을 때 값이 이상하게 나올 수도 있을듯
-                            )
-            );
+            Map<String, String> categoryMap = categoryCounts.stream()
+                    .collect(Collectors.toMap(
+                            categoryCount -> categoryCount.category().getLabel(),
+                            categoryCount -> categoryCount.count().toString()
+                    ));
+
+            redisTemplate.opsForHash().putAll(key, categoryMap);
         }
 
         long sequence = redisTemplate.opsForValue()
