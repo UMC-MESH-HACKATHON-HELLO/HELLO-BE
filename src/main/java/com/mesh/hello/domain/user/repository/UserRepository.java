@@ -14,6 +14,15 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByUsername(String username);
 
+    /** 이메일 중복 여부 확인. 카카오 가입자처럼 email이 null인 경우는 제외된다. */
+    boolean existsByEmail(String email);
+
+    /**
+     * 탈퇴하지 않은 사용자를 ID로 조회.
+     * 탈퇴 처리된 계정({@code deleted = true})은 반환하지 않는다.
+     */
+    Optional<User> findByIdAndDeletedFalse(Long id);
+
     /** 보유 포인트를 원자적으로 증감한다. 동시 적립 시 갱신 유실을 막기 위해 find-and-save 대신 사용한다. */
     @Modifying
     @Query("UPDATE User u SET u.points = u.points + :amount WHERE u.id = :id")

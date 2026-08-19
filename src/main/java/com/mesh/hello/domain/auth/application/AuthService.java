@@ -188,8 +188,8 @@ public class AuthService {
     /**
      * User 객체를 기준으로 권한 목록을 결정한다.
      *
-     * <p>현재는 모든 도우미에게 {@code ROLE_HELPER}를 부여한다.
-     * 향후 {@code UserRole} 필드를 추가할 경우 여기서 분기하면 된다.</p>
+     * <p>어르신은 {@code users} 테이블에 행을 갖지 않고 익명 세션으로만 동작한다.
+     * 따라서 이 메서드에 도달하는 사용자는 반드시 도우미이므로 {@code ROLE_HELPER}를 부여한다.</p>
      */
     private List<GrantedAuthority> resolveAuthorities(User user) {
         return List.of(new SimpleGrantedAuthority("ROLE_HELPER"));
