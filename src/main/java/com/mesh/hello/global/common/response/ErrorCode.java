@@ -27,8 +27,18 @@ public enum ErrorCode {
     UNAUTHORIZED(401, "인증이 필요합니다."),
     DUPLICATE_USERNAME(409, "이미 사용 중인 사용자명입니다."),
     INVALID_USERNAME_FORMAT(400, "사용자명은 영문/숫자/언더스코어 3~20자여야 합니다."),
+    INVALID_PASSWORD_FORMAT(400, "비밀번호는 영문·숫자·특수문자를 포함한 8~20자여야 합니다."),
+    INVALID_EMAIL_FORMAT(400, "이메일 형식이 올바르지 않습니다."),
+    INVALID_NICKNAME_FORMAT(400, "닉네임은 2~10자여야 합니다."),
+    PASSWORD_CONFIRM_MISMATCH(400, "비밀번호와 비밀번호 확인이 일치하지 않습니다."),
+    PRIVACY_AGREEMENT_REQUIRED(400, "개인정보 수집 및 이용에 동의해야 합니다."),
+    DUPLICATE_EMAIL(409, "이미 사용 중인 이메일입니다."),
     RESERVED_USERNAME_PREFIX(400, "카카오 로그인 전용으로 예약된 사용자명 형식입니다."),
     KAKAO_USERNAME_CONFLICT(409, "카카오 로그인에 실패했습니다. 관리자에게 문의해주세요."),
+
+    // 탈퇴
+    ALREADY_WITHDRAWN(400, "이미 탈퇴한 계정입니다."),
+    WITHDRAW_BLOCKED_BY_CALL(409, "진행 중인 통화가 있어 탈퇴할 수 없습니다."),
 
     // 카카오 OAuth
     OAUTH_STATE_MISMATCH(401, "OAuth state 값이 유효하지 않습니다."),
