@@ -63,23 +63,43 @@ public class GlobalExceptionHandler {
     /**
      * DB unique 제약 위반 핸들러 (AC101-1 — 중복).
      *
-     * <p>예외 원문은 응답에 노출하지 않고 {@code log.warn}으로만 기록한다.
-     * 메시지에 "email" 또는 "uq_users_email"이 포함되면 이메일 중복,
-     * 그 외에는 사용자명 중복으로 판단한다.</p>
+     * <p>예외 원문은 응답에 노출하지 않는다. 제약 이름으로만 중복 종류를 판단한다.</p>
+     *
+     * <ul>
+     *   <li>메시지에 {@code uq_users_email} 포함 → 이메일 중복</li>
+     *   <li>메시지에 {@code uq_users_username} 포함 → 아이디 중복</li>
+     *   <li>그 외(FK, NOT NULL, {@code uq_users_provider_provider_id} 등) →
+     *       예외 원문을 {@code log.error}로 기록하고 500으로 폴백.
+     *       응답 본문에는 원문을 노출하지 않는다.</li>
+     * </ul>
      */
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<ApiResponse<Void>> handleDataIntegrity(DataIntegrityViolationException e) {
-        log.warn("데이터 무결성 위반: {}", e.getMostSpecificCause().getMessage());
-
         String msg = e.getMostSpecificCause().getMessage();
-        boolean isEmailDuplicate = msg != null &&
-                (msg.toLowerCase().contains("email") || msg.toLowerCase().contains("uq_users_email"));
+        String msgLower = msg != null ? msg.toLowerCase() : "";
 
-        ErrorCode errorCode = isEmailDuplicate ? ErrorCode.DUPLICATE_EMAIL : ErrorCode.DUPLICATE_USERNAME;
+        if (msgLower.contains("uq_users_email")) {
+            log.warn("이메일 중복 위반: {}", msg);
+            return ResponseEntity
+                    .status(ErrorCode.DUPLICATE_EMAIL.getCode())
+                    .body(ApiResponse.error(ErrorCode.DUPLICATE_EMAIL.getCode(),
+                            ErrorCode.DUPLICATE_EMAIL.getMessage()));
+        }
 
+        if (msgLower.contains("uq_users_username")) {
+            log.warn("사용자명 중복 위반: {}", msg);
+            return ResponseEntity
+                    .status(ErrorCode.DUPLICATE_USERNAME.getCode())
+                    .body(ApiResponse.error(ErrorCode.DUPLICATE_USERNAME.getCode(),
+                            ErrorCode.DUPLICATE_USERNAME.getMessage()));
+        }
+
+        // 예상 외 제약 위반 — 원문을 로그에만 남기고 500으로 폴백
+        log.error("예상하지 못한 데이터 무결성 위반: {}", msg);
         return ResponseEntity
-                .status(errorCode.getCode())
-                .body(ApiResponse.error(errorCode.getCode(), errorCode.getMessage()));
+                .status(ErrorCode.INTERNAL_ERROR.getCode())
+                .body(ApiResponse.error(ErrorCode.INTERNAL_ERROR.getCode(),
+                        ErrorCode.INTERNAL_ERROR.getMessage()));
     }
 
     @ExceptionHandler(NoResourceFoundException.class)
