@@ -96,5 +96,24 @@ class ForbiddenWordServiceTest {
             assertThat(service.findHit("아 씨발 진짜")).isPresent();
             assertThat(service.findHit("오늘 점심 뭐 먹지")).isEmpty();
         }
+
+        /**
+         * 단음절/어간 단위 금지어("씹", "꺼져", "시끄러" 등)는 "씹어 드세요", "화면이 꺼져 있어요",
+         * "여기가 시끄러워요"처럼 무해한 단어에도 부분 문자열로 히트해 정상 통화를 오탐 종료시킬 수 있다.
+         * 실제 정책 파일을 대상으로 일상적인 문장(특히 스마트폰/키오스크 도움 도메인)이 오탐하지
+         * 않는지 회귀 검증한다.
+         */
+        @Test
+        @DisplayName("일상적인 문장(음식/기기 상태/소음 맥락)은 금지어로 오탐하지 않는다")
+        void doesNotFalselyMatchEverydaySentences() {
+            ForbiddenWordService service = new ForbiddenWordService(
+                    new ClassPathResource("policy/forbidden-words.txt"));
+
+            assertThat(service.findHit("음식을 천천히 씹어 드세요")).isEmpty();
+            assertThat(service.findHit("이가 안 좋아서 잘 씹지를 못해요")).isEmpty();
+            assertThat(service.findHit("화면이 꺼져 있어요")).isEmpty();
+            assertThat(service.findHit("배터리가 다 돼서 꺼졌어요")).isEmpty();
+            assertThat(service.findHit("여기가 좀 시끄러워요")).isEmpty();
+        }
     }
 }
