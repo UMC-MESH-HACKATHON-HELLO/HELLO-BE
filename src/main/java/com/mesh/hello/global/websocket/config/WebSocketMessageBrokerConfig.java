@@ -50,9 +50,19 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        // sessionId를 HttpSession(JSESSIONID 쿠키) 기반으로 신뢰하는 이상, 이 엔드포인트를
+        // 전체 origin에 열어두면 다른 origin의 페이지가 피해자 브라우저의 쿠키를 실어
+        // 핸드셰이크를 보내는 것만으로 그 사람 행세를 할 수 있다. REST API와 동일한
+        // 화이트리스트로 제한한다(SecurityConfig.corsConfigurationSource() 참고).
         registry.addEndpoint("/api/v1/ws")
             .addInterceptors(shutdownAwareHandshakeInterceptor, sessionIdHandshakeInterceptor)
-            .setAllowedOriginPatterns("*")
+            .setAllowedOrigins(
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "https://hello.sublumen.xyz",
+                "https://hello-fe-bay.vercel.app",
+                "https://hello-fe-git-main-jungbin.vercel.app"
+            )
             .withSockJS();
     }
 
