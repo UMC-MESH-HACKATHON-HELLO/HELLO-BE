@@ -182,11 +182,12 @@ public class MatchingService {
      * roomId만 알면(또는 추측하면) 참가자가 아닌 클라이언트가 남의 통화를 강제 종료할 수 있는
      * 문제를 막기 위함이다.</p>
      *
-     * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있으므로, 방 제거는
-     * {@link MatchingRoomRepository#deleteByRoomId}의 원자적 제거 결과로 판단해
-     * 둘 중 먼저 제거에 성공한 호출만 포인트를 적립한다. 포인트 적립은
-     * {@code PointHistory.roomId}의 유니크 제약으로도 한 번만 반영되며, 적립이 실패하더라도
-     * ENDED 브로드캐스트는 항상 수행한다.</p>
+     * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있으므로, {@link MatchingRoom#markClosing()}의
+     * 원자적 CAS 결과로 "최초 종료 요청"을 가려낸다. 종료 처리(녹취 flush·요약·포인트 적립·ENDED 발행)는
+     * markClosing()에 성공한 호출 하나만 수행한다 — 진 쪽은 이미 이긴 쪽이 같은 topic으로 ENDED를
+     * 보내므로 별도 처리가 필요 없고, 무거운 녹취 요약이 중복 실행되는 것도 막는다. 방이 애초에
+     * 존재하지 않으면(roomOpt 비어있음) 이 블록에 들어가지 않으므로 존재하지 않는 방으로 ENDED가
+     * 새 나가는 일도 없다.</p>
      */
     public void endCall(String sessionId, String roomId) {
         Optional<MatchingRoom> roomOpt = matchingRoomRepository.findByRoomId(roomId);
@@ -194,8 +195,7 @@ public class MatchingService {
             throw new BusinessException(ErrorCode.FORBIDDEN_SESSION);
         }
 
-        roomOpt.ifPresent(room -> {
-            room.markClosing();
+        roomOpt.filter(MatchingRoom::markClosing).ifPresent(room -> {
             String transcript = transcribeService.flushTranscript(roomId);
             int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
             geminiSummarizationService.markPending(
@@ -206,12 +206,12 @@ public class MatchingService {
             if (matchingRoomRepository.deleteByRoomId(roomId).isPresent()) {
                 awardPointsSafely(room.getHelperSessionId(), roomId);
             }
-        });
 
-        messagingTemplate.convertAndSend(
-                "/api/v1/topic/room/" + roomId,
-                (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
-        );
+            messagingTemplate.convertAndSend(
+                    "/api/v1/topic/room/" + roomId,
+                    (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
+            );
+        });
     }
 
     /**

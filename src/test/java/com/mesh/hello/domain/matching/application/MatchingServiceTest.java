@@ -414,15 +414,29 @@ class MatchingServiceTest {
         }
 
         @Test
-        @DisplayName("존재하지 않는 roomId로 종료를 시도하면 조용히 통과한다(양측 동시 종료 대비)")
+        @DisplayName("존재하지 않는 roomId로 종료를 시도하면 조용히 통과하고 브로드캐스트도 하지 않는다")
         void endCallOnAlreadyEndedRoomIsNoop() {
             matchingService.endCall("helpee-1", "no-such-room");
 
-            ArgumentCaptor<Object> endedCaptor = ArgumentCaptor.forClass(Object.class);
-            verify(messagingTemplate).convertAndSend(
-                    eq("/api/v1/topic/room/no-such-room"), endedCaptor.capture()
-            );
-            assertThat(resultOf(endedCaptor.getValue())).isEqualTo(Map.of("type", "ENDED"));
+            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+        }
+
+        @Test
+        @DisplayName("이미 다른 경로(예: handleDisconnect)가 종료를 선점한 방이면 종료 처리를 건너뛴다")
+        void endCallSkipsWhenAlreadyMarkedClosing() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+
+            MatchingRoom room = matchingRoomRepository.findBySessionId("helpee-1").orElseThrow();
+            room.markClosing(); // 다른 경로가 이미 종료 처리를 선점했다고 가정
+            clearInvocations(messagingTemplate);
+
+            matchingService.endCall("helpee-1", room.getRoomId());
+
+            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+            verify(pointService, never()).awardCallCompletePoints(any(), anyString());
+            assertThat(matchingRoomRepository.findByRoomId(room.getRoomId())).isPresent();
         }
     }
 
