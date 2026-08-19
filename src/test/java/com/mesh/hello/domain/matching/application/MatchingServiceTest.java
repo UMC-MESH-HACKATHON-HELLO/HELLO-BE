@@ -8,7 +8,10 @@ import com.mesh.hello.domain.matching.repository.InMemoryMatchingRoomRepository;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.reward.application.PointService;
+import com.mesh.hello.domain.stt.application.ForbiddenWordDetectedEvent;
 import com.mesh.hello.domain.stt.application.TranscribeService;
+import com.mesh.hello.domain.stt.domain.ForbiddenWordDetection;
+import com.mesh.hello.domain.stt.repository.ForbiddenWordDetectionRepository;
 import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ErrorCode;
 import org.junit.jupiter.api.BeforeEach;
@@ -58,6 +61,9 @@ class MatchingServiceTest {
     @Mock
     private PointService pointService;
 
+    @Mock
+    private ForbiddenWordDetectionRepository forbiddenWordDetectionRepository;
+
     private MatchingQueueRepository matchingQueueRepository;
     private MatchingRoomRepository matchingRoomRepository;
     private MatchingService matchingService;
@@ -74,7 +80,8 @@ class MatchingServiceTest {
                 transcribeService,
                 geminiSummarizationService,
                 sessionAccountRepository,
-                pointService
+                pointService,
+                forbiddenWordDetectionRepository
         );
     }
 
@@ -390,6 +397,65 @@ class MatchingServiceTest {
             matchingService.endCall("helpee-1", roomId);
 
             verify(pointService, never()).awardCallCompletePoints(any(), anyString());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
+    // onForbiddenWordDetected
+    // ─────────────────────────────────────────────────────────
+    @Nested
+    @DisplayName("onForbiddenWordDetected - 금지어 감지 시 강제 종료")
+    class OnForbiddenWordDetectedTest {
+
+        @Test
+        @DisplayName("금지어 감지 → 감지 이력 저장 + FORCE_ENDED 브로드캐스트 + 방 삭제, 요약/포인트는 없음")
+        void forceEndsCallOnDetection() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+            clearInvocations(messagingTemplate);
+
+            matchingService.onForbiddenWordDetected(
+                    new ForbiddenWordDetectedEvent(roomId, "helpee-1", "helpee", "금지어", "그 금지어 발화입니다"));
+
+            ArgumentCaptor<Object> captor = ArgumentCaptor.forClass(Object.class);
+            verify(messagingTemplate).convertAndSend(eq("/api/v1/topic/room/" + roomId), captor.capture());
+            assertThat(resultOf(captor.getValue()).get("type")).isEqualTo("FORCE_ENDED");
+
+            assertThat(matchingRoomRepository.findByRoomId(roomId)).isEmpty();
+            verify(forbiddenWordDetectionRepository).save(any(ForbiddenWordDetection.class));
+            verify(geminiSummarizationService, never()).summarizeAndNotify(any(), any(), any(), any());
+            verify(pointService, never()).awardCallCompletePoints(any(), anyString());
+        }
+
+        @Test
+        @DisplayName("이미 종료 처리 중인 방이면 중복 처리하지 않는다")
+        void ignoresAlreadyClosingRoom() throws Exception {
+            matchingQueueRepository.pushHelper("helper-1");
+            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+            matchingRoomRepository.findByRoomId(roomId).get().markClosing();
+            clearInvocations(messagingTemplate);
+
+            matchingService.onForbiddenWordDetected(
+                    new ForbiddenWordDetectedEvent(roomId, "helpee-1", "helpee", "금지어", "그 금지어 발화입니다"));
+
+            verify(messagingTemplate, never()).convertAndSend(eq("/api/v1/topic/room/" + roomId), any(Object.class));
+            verify(forbiddenWordDetectionRepository, never()).save(any());
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 방이면 아무 동작도 하지 않는다")
+        void ignoresUnknownRoom() {
+            matchingService.onForbiddenWordDetected(
+                    new ForbiddenWordDetectedEvent("no-such-room", "helpee-1", "helpee", "금지어", "발화"));
+
+            verify(messagingTemplate, never()).convertAndSend(anyString(), any(Object.class));
+            verify(forbiddenWordDetectionRepository, never()).save(any());
         }
     }
 

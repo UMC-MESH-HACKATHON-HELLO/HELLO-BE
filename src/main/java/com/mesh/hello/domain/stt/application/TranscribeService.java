@@ -12,6 +12,7 @@ import okhttp3.WebSocket;
 import okhttp3.WebSocketListener;
 import okio.ByteString;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -41,14 +42,20 @@ public class TranscribeService {
     private final RtzrTokenProvider tokenProvider;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final SimpMessagingTemplate messagingTemplate;
+    private final ForbiddenWordService forbiddenWordService;
+    private final ApplicationEventPublisher eventPublisher;
 
     public TranscribeService(
             @Qualifier("rtzrStreamingHttpClient") OkHttpClient rtzrStreamingHttpClient,
             RtzrTokenProvider tokenProvider,
-            SimpMessagingTemplate messagingTemplate) {
+            SimpMessagingTemplate messagingTemplate,
+            ForbiddenWordService forbiddenWordService,
+            ApplicationEventPublisher eventPublisher) {
         this.rtzrStreamingHttpClient = rtzrStreamingHttpClient;
         this.tokenProvider = tokenProvider;
         this.messagingTemplate = messagingTemplate;
+        this.forbiddenWordService = forbiddenWordService;
+        this.eventPublisher = eventPublisher;
     }
 
     // sessionId → STT 세션
@@ -126,14 +133,22 @@ public class TranscribeService {
         boolean isFinal = result.isFinal();
         if (text == null || text.isBlank()) return;
 
+        String speakerRole = roomRoles.getOrDefault(roomId, new ConcurrentHashMap<>())
+                .getOrDefault(sessionId, "unknown");
+
         if (isFinal) {
-            String speakerRole = roomRoles.getOrDefault(roomId, new ConcurrentHashMap<>())
-                    .getOrDefault(sessionId, "unknown");
             Queue<String> transcript = transcripts.get(roomId);
             if (transcript != null) {
                 transcript.add("[" + speakerRole + "] " + text);
             }
         }
+
+        // 강제 종료가 핵심 기능이므로 문장이 확정(isFinal)되길 기다리지 않고 중간 인식 단계에서 검사한다.
+        forbiddenWordService.findHit(text).ifPresent(matchedWord -> {
+            log.warn("금지어 감지: room={}, session={}, word={}", roomId, sessionId, matchedWord);
+            eventPublisher.publishEvent(
+                    new ForbiddenWordDetectedEvent(roomId, sessionId, speakerRole, matchedWord, text));
+        });
 
         TranscriptMessage msg = new TranscriptMessage(sessionId, text, isFinal);
         messagingTemplate.convertAndSend("/api/v1/topic/transcript/" + roomId, msg);

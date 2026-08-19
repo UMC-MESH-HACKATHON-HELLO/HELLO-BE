@@ -6,12 +6,16 @@ import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.reward.application.PointService;
+import com.mesh.hello.domain.stt.application.ForbiddenWordDetectedEvent;
 import com.mesh.hello.domain.stt.application.TranscribeService;
+import com.mesh.hello.domain.stt.domain.ForbiddenWordDetection;
+import com.mesh.hello.domain.stt.repository.ForbiddenWordDetectionRepository;
 import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ApiResponse;
 import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +40,7 @@ public class MatchingService {
     private final GeminiSummarizationService geminiSummarizationService;
     private final SessionAccountRepository sessionAccountRepository;
     private final PointService pointService;
+    private final ForbiddenWordDetectionRepository forbiddenWordDetectionRepository;
 
     /**
      * 큐에서 pop됐지만 아직 방 저장이 끝나지 않은(LiveKit 토큰 발급 중인) helper 세션 집합.
@@ -211,6 +216,44 @@ public class MatchingService {
                 "/api/v1/topic/room/" + roomId,
                 (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
         );
+    }
+
+    /**
+     * STT 파이프라인(TranscribeService)에서 금지어가 감지되면 통화를 강제 종료한다.
+     * {@code stt} 도메인이 {@code matching}을 직접 참조하지 않도록 이벤트로 디커플링돼 있다.
+     *
+     * <p>정상 종료({@link #endCall})와 달리 Gemini 요약은 생성하지 않고(금지어가 섞인 대화를
+     * 요약에 노출하지 않기 위함), 포인트도 적립하지 않는다. 양측에는 ENDED가 아닌 FORCE_ENDED를
+     * 전송해 강제 종료임을 구분한다.</p>
+     */
+    @EventListener
+    public void onForbiddenWordDetected(ForbiddenWordDetectedEvent event) {
+        MatchingRoom room = matchingRoomRepository.findByRoomId(event.roomId()).orElse(null);
+        if (room == null || !room.markClosing()) {
+            return;
+        }
+
+        saveDetectionSafely(event);
+        transcribeService.flushTranscript(event.roomId());
+
+        if (matchingRoomRepository.deleteByRoomId(event.roomId()).isEmpty()) {
+            return;
+        }
+
+        messagingTemplate.convertAndSend(
+                "/api/v1/topic/room/" + event.roomId(),
+                (Object) ApiResponse.ok("부적절한 발화가 감지되어 통화가 강제 종료되었습니다.",
+                        Map.of("type", "FORCE_ENDED", "reason", "FORBIDDEN_WORD"))
+        );
+    }
+
+    private void saveDetectionSafely(ForbiddenWordDetectedEvent event) {
+        try {
+            forbiddenWordDetectionRepository.save(new ForbiddenWordDetection(
+                    event.roomId(), event.sessionId(), event.role(), event.matchedWord(), event.utterance()));
+        } catch (Exception e) {
+            log.warn("금지어 감지 이력 저장 실패: roomId={}", event.roomId(), e);
+        }
     }
 
     /**
