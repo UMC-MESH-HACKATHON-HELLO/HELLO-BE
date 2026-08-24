@@ -2,6 +2,7 @@ package com.mesh.hello.domain.matching.application;
 
 import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
 import com.mesh.hello.domain.calling.application.GeminiSummarizationService;
+import com.mesh.hello.domain.calling.domain.CallSummary;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
@@ -28,7 +29,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class MatchingService {
 
-    private final MatchingQueueRepository matchingQueueRepository;
+    // private final MatchingQueueRepository matchingQueueRepository;
     private final MatchingRoomRepository matchingRoomRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final LiveKitService liveKitService;
@@ -36,6 +37,7 @@ public class MatchingService {
     private final GeminiSummarizationService geminiSummarizationService;
     private final SessionAccountRepository sessionAccountRepository;
     private final PointService pointService;
+    private final PriorityMatchingService priorityMatchingService;
 
     /**
      * 큐에서 pop됐지만 아직 방 저장이 끝나지 않은(LiveKit 토큰 발급 중인) helper 세션 집합.
@@ -50,18 +52,25 @@ public class MatchingService {
      * 대기 중인 도우미(helper)가 있으면 즉시 매칭해 양측에 MATCHED + LiveKit 토큰을 전송한다.
      * 도우미가 없으면 helpee를 대기열에 넣고 NO_HELPER를 전송한다.
      */
-    public void requestMatch(String helpeeSessionId) {
+    public void requestMatch(
+            String helpeeSessionId,
+            CallSummary.CallCategory category
+    ) {
         String helperSessionId;
         synchronized (helperLock) {
-            Optional<String> helperOpt = matchingQueueRepository.popWaitingHelper();
+
+            Optional<String> helperOpt =
+                    priorityMatchingService.matchHelper(helpeeSessionId, category);
+
             if (helperOpt.isEmpty()) {
-                matchingQueueRepository.pushHelpee(helpeeSessionId);
+
                 messagingTemplate.convertAndSend(
                         "/api/v1/queue/signal/" + helpeeSessionId,
                         ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
                 );
                 return;
             }
+
             helperSessionId = helperOpt.get();
             helpersBeingMatched.add(helperSessionId);
         }
@@ -90,7 +99,7 @@ public class MatchingService {
         } catch (Exception e) {
             // 토큰 발급 실패 시 도우미 다시 큐에 넣고 helpee에게 실패 알림
             synchronized (helperLock) {
-                matchingQueueRepository.pushHelper(helperSessionId);
+                priorityMatchingService.restoreHelper(helperSessionId);
                 helpersBeingMatched.remove(helperSessionId);
             }
             messagingTemplate.convertAndSend(
@@ -100,23 +109,36 @@ public class MatchingService {
         }
     }
 
+    @Deprecated(since="CallCategory를 함께 전달해주세요.")
+    public void requestMatch(
+            String helpeeSessionId
+    ) {
+        requestMatch(helpeeSessionId, CallSummary.CallCategory.ETC);
+    }
+
     /**
      * 도우미(helper)가 대기열에 등록된다.
      * 대기 중인 도움 요청자(helpee)가 있으면 즉시 매칭을 시도한다.
      */
     public void registerHelper(String helperSessionId) {
-        Optional<String> helpeeOpt = matchingQueueRepository.popWaitingHelpee();
+        Optional<PriorityMatchingService.MatchedHelpee> helpeeOpt;
 
-        if (helpeeOpt.isEmpty()) {
-            matchingQueueRepository.pushHelper(helperSessionId);
-            messagingTemplate.convertAndSend(
-                    "/api/v1/queue/signal/" + helperSessionId,
-                    ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
-            );
-            return;
+        synchronized (helperLock) {
+            helpeeOpt = priorityMatchingService.registerHelper(helperSessionId);
+
+            if (helpeeOpt.isEmpty()) {
+                messagingTemplate.convertAndSend(
+                        "/api/v1/queue/signal/" + helperSessionId,
+                        ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
+                );
+                return;
+            }
+
+            helpersBeingMatched.add(helperSessionId);
         }
 
-        String helpeeSessionId = helpeeOpt.get();
+        PriorityMatchingService.MatchedHelpee helpee = helpeeOpt.get();
+        String helpeeSessionId = helpee.sessionId();
         String roomId = UUID.randomUUID().toString();
 
         try {
@@ -125,6 +147,10 @@ public class MatchingService {
 
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
+
+            synchronized (helperLock) {
+                helpersBeingMatched.remove(helperSessionId);
+            }
 
             messagingTemplate.convertAndSend(
                     "/api/v1/queue/signal/" + helpeeSessionId,
@@ -138,8 +164,11 @@ public class MatchingService {
             );
 
         } catch (Exception e) {
-            matchingQueueRepository.pushHelpee(helpeeSessionId);
-            matchingQueueRepository.pushHelper(helperSessionId);
+            synchronized (helperLock) {
+                priorityMatchingService.restoreHelpee(helpeeSessionId, helpee.category());
+                priorityMatchingService.restoreHelper(helperSessionId);
+                helpersBeingMatched.remove(helperSessionId);
+            }
         }
     }
 
@@ -160,7 +189,7 @@ public class MatchingService {
      */
     public void stopHelperWaiting(String helperSessionId) {
         synchronized (helperLock) {
-            if (matchingQueueRepository.removeHelper(helperSessionId)) {
+            if (priorityMatchingService.removeWaitingHelper(helperSessionId)) {
                 return;
             }
             if (helpersBeingMatched.contains(helperSessionId)) {
@@ -234,8 +263,7 @@ public class MatchingService {
      * 대기열에서 제거하고, 통화 중이었다면 상대방에게 PARTNER_DISCONNECTED를 전송한다.
      */
     public void handleDisconnect(String sessionId) {
-        matchingQueueRepository.removeHelper(sessionId);
-        matchingQueueRepository.removeHelpee(sessionId);
+        priorityMatchingService.removeWaitingParticipant(sessionId);
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
             room.markClosing();

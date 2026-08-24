@@ -1,11 +1,15 @@
 package com.mesh.hello.domain.matching.controller;
 
+import com.mesh.hello.domain.calling.domain.CallSummary;
 import com.mesh.hello.domain.matching.application.MatchingService;
+import com.mesh.hello.domain.matching.dto.HelpRequest;
 import com.mesh.hello.domain.matching.dto.SignalMessage;
 import com.mesh.hello.global.common.response.ApiResponse;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Controller;
 
@@ -25,8 +29,16 @@ public class SignalingController {
 
     // 어르신 도움 요청 → 매칭 시도
     @MessageMapping("/help/request")
-    public void helpRequest(Principal principal) {
-        matchingService.requestMatch(principal.getName());
+    public void helpRequest(
+            Principal principal,
+            @Payload @Valid HelpRequest request
+    ) {
+        // 유효성 검증 실패한 경우 ETC로 정규화
+        CallSummary.CallCategory category;
+        if (request != null && request.category() != null) category = request.category();
+        else category = CallSummary.CallCategory.ETC;
+
+        matchingService.requestMatch(principal.getName(), category);
     }
 
     // 통화 종료

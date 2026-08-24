@@ -11,7 +11,7 @@ class CallSummaryResponseTest {
     @Test
     @DisplayName("from - CallSummary의 category를 응답 DTO에 그대로 옮긴다")
     void from_mapsCategory() {
-        CallSummary summary = new CallSummary("room-1", "helpee-1", "helper-1", 60);
+        CallSummary summary = new CallSummary("room-1", "helpee-1", "helper-1", 60, null);
         summary.complete("transcript", "요약 텍스트", CallSummary.CallCategory.SMARTPHONE);
 
         CallSummaryResponse response = CallSummaryResponse.from(summary);
@@ -23,7 +23,7 @@ class CallSummaryResponseTest {
     @Test
     @DisplayName("from - category 컬럼 추가 이전에 완료되어 category가 null인 레코드는 ETC로 기본 처리한다")
     void from_nullCategoryDefaultsToEtc() {
-        CallSummary summary = new CallSummary("room-1", "helpee-1", "helper-1", 60);
+        CallSummary summary = new CallSummary("room-1", "helpee-1", "helper-1", 60, null);
         summary.complete("transcript", "요약 텍스트", null);
 
         CallSummaryResponse response = CallSummaryResponse.from(summary);
