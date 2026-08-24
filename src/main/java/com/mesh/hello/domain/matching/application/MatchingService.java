@@ -121,15 +121,20 @@ public class MatchingService {
      * 대기 중인 도움 요청자(helpee)가 있으면 즉시 매칭을 시도한다.
      */
     public void registerHelper(String helperSessionId) {
-        Optional<PriorityMatchingService.MatchedHelpee> helpeeOpt =
-                priorityMatchingService.registerHelper(helperSessionId);
+        Optional<PriorityMatchingService.MatchedHelpee> helpeeOpt;
 
-        if (helpeeOpt.isEmpty()) {
-            messagingTemplate.convertAndSend(
-                    "/api/v1/queue/signal/" + helperSessionId,
-                    ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
-            );
-            return;
+        synchronized (helperLock) {
+            helpeeOpt = priorityMatchingService.registerHelper(helperSessionId);
+
+            if (helpeeOpt.isEmpty()) {
+                messagingTemplate.convertAndSend(
+                        "/api/v1/queue/signal/" + helperSessionId,
+                        ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
+                );
+                return;
+            }
+
+            helpersBeingMatched.add(helperSessionId);
         }
 
         PriorityMatchingService.MatchedHelpee helpee = helpeeOpt.get();
@@ -143,6 +148,10 @@ public class MatchingService {
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
 
+            synchronized (helperLock) {
+                helpersBeingMatched.remove(helperSessionId);
+            }
+
             messagingTemplate.convertAndSend(
                     "/api/v1/queue/signal/" + helpeeSessionId,
                     ApiResponse.ok("매칭에 성공했습니다.",
@@ -155,8 +164,11 @@ public class MatchingService {
             );
 
         } catch (Exception e) {
-            priorityMatchingService.restoreHelpee(helpeeSessionId, helpee.category());
-            priorityMatchingService.restoreHelper(helperSessionId);
+            synchronized (helperLock) {
+                priorityMatchingService.restoreHelpee(helpeeSessionId, helpee.category());
+                priorityMatchingService.restoreHelper(helperSessionId);
+                helpersBeingMatched.remove(helperSessionId);
+            }
         }
     }
 
