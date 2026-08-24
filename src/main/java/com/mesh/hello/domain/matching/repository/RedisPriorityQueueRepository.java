@@ -27,136 +27,128 @@ public class RedisPriorityQueueRepository
     private static final String HELPEE_CATEGORY_PREFIX =
             "matching:helpee:category:";
 
+    /**
+     * 카테고리별로 분리된 helper/helpee 대기열. 각 helper는 K개(카테고리 종류 수)
+     * 큐 전부에 들어가고, 큐마다 그 카테고리에 대한 점수가 다르게 저장된다.
+     * helpee는 자기 카테고리에 해당하는 큐 하나에만 들어간다.
+     */
+    private static final String HELPER_CATEGORY_QUEUE_PREFIX =
+            "matching:helpers:queue:";
+    private static final String HELPEE_CATEGORY_QUEUE_PREFIX =
+            "matching:helpees:queue:";
+
+    /**
+     * 대기시간 보너스 계수. score = categoryScore - sequence * SEQUENCE_EPSILON.
+     * sequence가 작을수록(먼저 등록될수록) score가 커지도록(덜 깎이도록) 만드는
+     * 아주 작은 값이다. categoryScore가 최대 수천 단위인 것을 감안해, sequence가
+     * 상당히 커져도(수백만 단위) categoryScore 우선순위를 잘 뒤집지 않을 정도로
+     * 작게 잡았다. 필요하면 @Value로 외부 설정화해도 된다.
+     */
+    private static final double SEQUENCE_EPSILON = 1e-7;
+
     private final StringRedisTemplate redisTemplate;
 
     /*
      * ------------------------------------------------------------------
-     * Lua 스크립트: "점수 계산 -> 최고 점수 후보 선택 -> ZREM -> 카테고리 삭제"를
-     * 하나의 원자적 연산으로 묶는다. 이 스크립트가 실행되는 동안에는 Redis가
-     * 다른 클라이언트의 명령을 끼워 넣지 않으므로, 후보를 읽은 뒤 서비스 계층에서
-     * 별도로 제거하던 기존 방식에서 발생하던 "그 사이 재등록" 경쟁 조건이 사라진다.
+     * [Helper claim]
+     * helper는 push 시점에 카테고리별 점수가 이미 확정되어 각 카테고리 큐에
+     * 저장되어 있으므로(더 이상 maxSequence 같은 "현재 시점" 값에 의존하지
+     * 않음), claim은 요청된 카테고리 큐에서 최고 점수 1명을 뽑아오는 것만으로
+     * 끝난다. 스캔이 필요 없다 (O(log N)).
      *
-     * 주의: 아래 스크립트는 헬퍼/헬피별로 동적인 카테고리 key(prefix + member)에
-     * 접근한다. Redis Cluster 환경에서는 스크립트 내에서 접근하는 모든 key가
-     * 동일 해시 슬롯에 있어야 하므로 이 형태 그대로는 사용할 수 없다(CROSSSLOT
-     * 오류 발생). 단일 인스턴스/센티널 구성에서는 문제 없다.
+     * 뽑힌 helper는 다른 K-1개 카테고리 큐에도 남아있으므로 전부 제거해야
+     * 한다. 이 모든 과정(선택 + 전체 큐에서 제거 + metadata 삭제)을 하나의
+     * Lua 스크립트로 묶어 원자적으로 처리한다.
+     *
+     * 주의: Redis Cluster 환경에서는 스크립트가 접근하는 여러 key(카테고리별
+     * 큐 K개 + 마스터 큐)가 서로 다른 해시 슬롯에 흩어질 수 있어 이 형태
+     * 그대로는 못 쓴다(CROSSSLOT). 단일 인스턴스/센티널 구성 기준이다.
      * ------------------------------------------------------------------
      */
     private static final String CLAIM_HELPER_SCRIPT = """
-            local queueKey = KEYS[1]
-            local sequenceKey = KEYS[2]
-            local categoryPrefix = ARGV[1]
-            local categoryLabel = ARGV[2]
-            local categoryCount = tonumber(ARGV[3])
- 
-            local members = redis.call('ZRANGE', queueKey, 0, -1, 'WITHSCORES')
-            if #members == 0 then
+            local categoryQueueKey = KEYS[1]
+            local masterQueueKey = KEYS[2]
+            local categoryHashPrefix = ARGV[1]
+            local categoryQueuePrefix = ARGV[2]
+
+            local top = redis.call('ZREVRANGE', categoryQueueKey, 0, 0)
+            if #top == 0 then
                 return nil
             end
- 
-            local maxSequenceStr = redis.call('GET', sequenceKey)
-            if not maxSequenceStr then
-                return redis.error_reply('NO_HELPER_SEQUENCE')
+            local selected = top[1]
+
+            redis.call('ZREM', masterQueueKey, selected)
+            redis.call('DEL', categoryHashPrefix .. selected)
+
+            -- 선택된 helper를 다른 모든 카테고리 큐에서도 제거한다.
+            for i = 3, #ARGV do
+                redis.call('ZREM', categoryQueuePrefix .. ARGV[i], selected)
             end
-            local maxSequence = tonumber(maxSequenceStr)
- 
-            local selected = nil
-            local highestScore = -1e308
- 
-            for i = 1, #members, 2 do
-                local member = members[i]
-                local sequence = tonumber(members[i + 1])
- 
-                local categoryKey = categoryPrefix .. member
-                local hash = redis.call('HGETALL', categoryKey)
- 
-                local x = 0
-                local total = 0
-                local j = 1
-                while j <= #hash do
-                    local field = hash[j]
-                    local value = tonumber(hash[j + 1])
-                    total = total + value
-                    if field == categoryLabel then
-                        x = value
-                    end
-                    j = j + 2
-                end
- 
-                local score = ((x * x + 1) / (total + categoryCount)) * 1000
-                        + (maxSequence - sequence) / maxSequence
- 
-                if score > highestScore then
-                    highestScore = score
-                    selected = member
-                end
-            end
- 
-            if selected then
-                redis.call('ZREM', queueKey, selected)
-                redis.call('DEL', categoryPrefix .. selected)
-                return selected
-            end
- 
-            return nil
+
+            return selected
             """;
 
+    /*
+     * ------------------------------------------------------------------
+     * [Helpee claim]
+     * 같은 카테고리를 기다리는 helpee들은 이번 claim 요청(특정 helper 기준)
+     * 에서 전문성 점수(x, total)가 모두 동일하다 - 그 값은 "요청한 helper가
+     * 그 카테고리를 얼마나 다뤄봤는가"로만 결정되고 helpee가 누구인지와는
+     * 무관하기 때문이다. 따라서 카테고리 큐 하나 안에서는 항상 가장 오래
+     * 기다린 사람(=sequence가 가장 작은 사람)이 최선의 후보다.
+     *
+     * 그래서 K개 카테고리 큐 각각에서 '가장 오래 기다린 1명'만 조회(각각
+     * O(log N))한 뒤, 그렇게 뽑힌 최대 K명끼리만 점수를 비교해 최종 승자를
+     * 고른다. 전체 대기열 스캔(O(N)) 대신 O(K log N)으로 끝난다.
+     * ------------------------------------------------------------------
+     */
     private static final String CLAIM_HELPEE_SCRIPT = """
-            local queueKey = KEYS[1]
-            local sequenceKey = KEYS[2]
-            local categoryPrefix = ARGV[1]
-            local categoryCount = tonumber(ARGV[2])
- 
-            local counts = {}
-            for i = 3, #ARGV, 2 do
-                counts[ARGV[i]] = tonumber(ARGV[i + 1])
-            end
+            local masterQueueKey = KEYS[1]
+            local categoryQueuePrefix = ARGV[1]
+            local categoryHashPrefix = ARGV[2]
+            local categoryCount = tonumber(ARGV[3])
+            local epsilon = tonumber(ARGV[4])
+
             local total = 0
-            for _, v in pairs(counts) do
-                total = total + v
+            local counts = {}
+            local categoryNames = {}
+            for i = 5, #ARGV, 2 do
+                local catName = ARGV[i]
+                local cnt = tonumber(ARGV[i + 1])
+                counts[catName] = cnt
+                total = total + cnt
+                categoryNames[#categoryNames + 1] = catName
             end
- 
-            local members = redis.call('ZRANGE', queueKey, 0, -1, 'WITHSCORES')
-            if #members == 0 then
-                return nil
-            end
- 
-            local maxSequenceStr = redis.call('GET', sequenceKey)
-            if not maxSequenceStr then
-                return redis.error_reply('NO_HELPEE_SEQUENCE')
-            end
-            local maxSequence = tonumber(maxSequenceStr)
- 
-            local selected = nil
+
+            local bestCategory = nil
+            local bestMember = nil
             local highestScore = -1e308
- 
-            for i = 1, #members, 2 do
-                local member = members[i]
-                local sequence = tonumber(members[i + 1])
- 
-                local categoryKey = categoryPrefix .. member
-                local helpeeCategory = redis.call('GET', categoryKey)
- 
-                local x = 0
-                if helpeeCategory and counts[helpeeCategory] then
-                    x = counts[helpeeCategory]
-                end
- 
-                local score = ((x * x + 1) / (total + categoryCount)) * 1000
-                        + (maxSequence - sequence) / maxSequence
- 
-                if score > highestScore then
-                    highestScore = score
-                    selected = member
+
+            for _, catName in ipairs(categoryNames) do
+                local queueKey = categoryQueuePrefix .. catName
+                local oldest = redis.call('ZRANGE', queueKey, 0, 0, 'WITHSCORES')
+                if #oldest > 0 then
+                    local member = oldest[1]
+                    local sequence = tonumber(oldest[2])
+                    local x = counts[catName] or 0
+                    local score = ((x * x + 1) / (total + categoryCount)) * 1000
+                            - sequence * epsilon
+
+                    if score > highestScore then
+                        highestScore = score
+                        bestCategory = catName
+                        bestMember = member
+                    end
                 end
             end
- 
-            if selected then
-                redis.call('ZREM', queueKey, selected)
-                redis.call('DEL', categoryPrefix .. selected)
-                return selected
+
+            if bestMember then
+                redis.call('ZREM', masterQueueKey, bestMember)
+                redis.call('ZREM', categoryQueuePrefix .. bestCategory, bestMember)
+                redis.call('DEL', categoryHashPrefix .. bestMember)
+                return bestMember
             end
- 
+
             return nil
             """;
 
@@ -166,37 +158,62 @@ public class RedisPriorityQueueRepository
     private static final RedisScript<String> CLAIM_HELPEE_REDIS_SCRIPT =
             new DefaultRedisScript<>(CLAIM_HELPEE_SCRIPT, String.class);
 
+    private double computeCategoryScore(long x, long total, int categoryTypeCount) {
+        return ((double) (x * x + 1) / (total + categoryTypeCount)) * 1000.0;
+    }
+
     @Override
     public void pushHelper(
             String helperSessionId,
             List<CategoryCount> categoryCounts
     ) {
-        String key = HELPER_CATEGORY_PREFIX + helperSessionId;
+        String hashKey = HELPER_CATEGORY_PREFIX + helperSessionId;
+        CallSummary.CallCategory[] allCategories = CallSummary.CallCategory.values();
 
+        // 기존 등록 정리: 마스터 큐, 모든 카테고리별 큐, metadata 해시.
         redisTemplate.opsForZSet().remove(HELPER_QUEUE, helperSessionId);
-        redisTemplate.delete(key);
+        for (CallSummary.CallCategory cat : allCategories) {
+            redisTemplate.opsForZSet()
+                    .remove(HELPER_CATEGORY_QUEUE_PREFIX + cat.name(), helperSessionId);
+        }
+        redisTemplate.delete(hashKey);
 
-        if (!categoryCounts.isEmpty()) {
-            // Lua 스크립트에서 label 매핑 없이 바로 비교할 수 있도록
-            // enum name()을 내부 저장 키로 사용한다. (외부 노출 값 아님)
-            Map<String, String> categoryMap = categoryCounts.stream()
+        Map<String, Long> countByCategory = categoryCounts.stream()
+                .collect(Collectors.toMap(
+                        cc -> cc.category().name(),
+                        CategoryCount::count
+                ));
+
+        if (!countByCategory.isEmpty()) {
+            Map<String, String> categoryMap = countByCategory.entrySet().stream()
                     .collect(Collectors.toMap(
-                            categoryCount -> categoryCount.category().name(),
-                            categoryCount -> categoryCount.count().toString()
+                            Map.Entry::getKey,
+                            e -> e.getValue().toString()
                     ));
-
-            redisTemplate.opsForHash().putAll(key, categoryMap);
+            redisTemplate.opsForHash().putAll(hashKey, categoryMap);
         }
 
         long sequence = redisTemplate.opsForValue()
                 .increment(HELPER_SEQUENCE);
 
+        long total = countByCategory.values().stream()
+                .mapToLong(Long::longValue)
+                .sum();
+
+        // 카테고리별 점수를 등록 시점에 전부 확정해서 각 카테고리 큐에 저장한다.
+        // 더 이상 claim 시점에 maxSequence 같은 "현재 시점" 값을 조회할 필요가
+        // 없다 - 이 값들은 이후 다른 helper가 등록되어도 변하지 않는다.
+        for (CallSummary.CallCategory cat : allCategories) {
+            long x = countByCategory.getOrDefault(cat.name(), 0L);
+            double score = computeCategoryScore(x, total, allCategories.length)
+                    - sequence * SEQUENCE_EPSILON;
+
+            redisTemplate.opsForZSet()
+                    .add(HELPER_CATEGORY_QUEUE_PREFIX + cat.name(), helperSessionId, score);
+        }
+
         redisTemplate.opsForZSet()
-                .add(
-                        HELPER_QUEUE,
-                        helperSessionId,
-                        sequence
-                );
+                .add(HELPER_QUEUE, helperSessionId, sequence);
     }
 
     /**
@@ -209,38 +226,24 @@ public class RedisPriorityQueueRepository
     public Optional<String> claimWaitingHelper(
             CallSummary.CallCategory category
     ) {
+        CallSummary.CallCategory[] allCategories = CallSummary.CallCategory.values();
+
+        List<String> args = new ArrayList<>();
+        args.add(HELPER_CATEGORY_PREFIX);
+        args.add(HELPER_CATEGORY_QUEUE_PREFIX);
+        for (CallSummary.CallCategory cat : allCategories) {
+            args.add(cat.name());
+        }
+
+        Object[] scriptArgs = args.toArray();
+
         String selected = redisTemplate.execute(
                 CLAIM_HELPER_REDIS_SCRIPT,
-                List.of(HELPER_QUEUE, HELPER_SEQUENCE),
-                HELPER_CATEGORY_PREFIX,
-                category.name(),
-                String.valueOf(CallSummary.CallCategory.values().length)
+                List.of(HELPER_CATEGORY_QUEUE_PREFIX + category.name(), HELPER_QUEUE),
+                scriptArgs
         );
 
         return Optional.ofNullable(selected);
-    }
-
-    /**
-     * 점수 계산식 : 라플라스 스무딩 + 들어온 순서에 따른 추가 점수 <br>
-     * ( (helpeeCategory 기록 수)<sup>2</sup> + 1) / (전체 기록 수 + 카테고리 수) * 1000 + (maxSequence - sequence) / maxSequence <br>
-     * <ul>
-     * <li>sequence : 들어온 순서 값 (id라고 생각해도 됨)</li>
-     * <li>maxSequence : 맨 마지막 순서 값 (맨 마지막 id 값이라고 생각해도 됨)</li>
-     * </ul>
-     */
-    private double createScore(
-            Map<String, Long> categoryCounts,
-            String helpeeCategory,
-            double sequence,
-            double maxSequence
-    ) {
-        double x = categoryCounts.getOrDefault(helpeeCategory, 0L);
-        double total = categoryCounts.values().stream()
-                .mapToDouble(Long::doubleValue)
-                .sum();
-        return (x * x + 1)
-                / (total + CallSummary.CallCategory.values().length) * 1000
-                + (maxSequence - sequence) / maxSequence;
     }
 
     @Override
@@ -254,10 +257,15 @@ public class RedisPriorityQueueRepository
                         );
 
         if (removed == null || removed == 0) {
-            // ZSET에 없었다면(이미 매칭/claim되어 빠진 상태일 수 있음) category
-            // metadata도 건드리지 않는다. 그래야 그 사이 재등록된 helper의
+            // 마스터 큐에 없었다면(이미 매칭/claim되어 빠진 상태일 수 있음)
+            // 다른 key도 건드리지 않는다. 그래야 그 사이 재등록된 helper의
             // metadata를 실수로 지우지 않는다.
             return false;
+        }
+
+        for (CallSummary.CallCategory cat : CallSummary.CallCategory.values()) {
+            redisTemplate.opsForZSet()
+                    .remove(HELPER_CATEGORY_QUEUE_PREFIX + cat.name(), helperSessionId);
         }
 
         redisTemplate.delete(
@@ -284,15 +292,21 @@ public class RedisPriorityQueueRepository
             CallSummary.CallCategory category
     ) {
 
-        String key =
+        String metaKey =
                 HELPEE_CATEGORY_PREFIX + helpeeSessionId;
 
         redisTemplate.opsForZSet().remove(HELPEE_QUEUE, helpeeSessionId);
-        redisTemplate.delete(key);
+
+        String previousCategory = redisTemplate.opsForValue().get(metaKey);
+        if (previousCategory != null) {
+            redisTemplate.opsForZSet()
+                    .remove(HELPEE_CATEGORY_QUEUE_PREFIX + previousCategory, helpeeSessionId);
+        }
+        redisTemplate.delete(metaKey);
 
         redisTemplate.opsForValue()
                 .set(
-                        key,
+                        metaKey,
                         category.name()
                 );
 
@@ -302,6 +316,13 @@ public class RedisPriorityQueueRepository
         redisTemplate.opsForZSet()
                 .add(
                         HELPEE_QUEUE,
+                        helpeeSessionId,
+                        sequence
+                );
+
+        redisTemplate.opsForZSet()
+                .add(
+                        HELPEE_CATEGORY_QUEUE_PREFIX + category.name(),
                         helpeeSessionId,
                         sequence
                 );
@@ -316,20 +337,30 @@ public class RedisPriorityQueueRepository
     public Optional<String> claimWaitingHelpee(
             List<CategoryCount> categoryCounts
     ) {
-        List<String> args = new ArrayList<>();
-        args.add(HELPEE_CATEGORY_PREFIX);
-        args.add(String.valueOf(CallSummary.CallCategory.values().length));
+        CallSummary.CallCategory[] allCategories = CallSummary.CallCategory.values();
 
-        for (CategoryCount categoryCount : categoryCounts) {
-            args.add(categoryCount.category().name());
-            args.add(categoryCount.count().toString());
+        Map<String, Long> countByCategory = categoryCounts.stream()
+                .collect(Collectors.toMap(
+                        cc -> cc.category().name(),
+                        CategoryCount::count
+                ));
+
+        List<String> args = new ArrayList<>();
+        args.add(HELPEE_CATEGORY_QUEUE_PREFIX);
+        args.add(HELPEE_CATEGORY_PREFIX);
+        args.add(String.valueOf(allCategories.length));
+        args.add(String.valueOf(SEQUENCE_EPSILON));
+
+        for (CallSummary.CallCategory cat : allCategories) {
+            args.add(cat.name());
+            args.add(String.valueOf(countByCategory.getOrDefault(cat.name(), 0L)));
         }
 
         Object[] scriptArgs = args.toArray(new String[0]);
 
         String selected = redisTemplate.execute(
                 CLAIM_HELPEE_REDIS_SCRIPT,
-                List.of(HELPEE_QUEUE, HELPEE_SEQUENCE),
+                List.of(HELPEE_QUEUE),
                 scriptArgs
         );
 
@@ -348,6 +379,13 @@ public class RedisPriorityQueueRepository
 
         if (removed == null || removed == 0) {
             return false;
+        }
+
+        String category = redisTemplate.opsForValue()
+                .get(HELPEE_CATEGORY_PREFIX + helpeeSessionId);
+        if (category != null) {
+            redisTemplate.opsForZSet()
+                    .remove(HELPEE_CATEGORY_QUEUE_PREFIX + category, helpeeSessionId);
         }
 
         redisTemplate.delete(
