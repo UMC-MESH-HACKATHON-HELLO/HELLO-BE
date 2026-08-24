@@ -13,7 +13,7 @@ public interface PriorityQueueRepository {
             List<CategoryCount> categoryCounts
     );
 
-    Optional<String> findWaitingHelper(
+    Optional<String> claimWaitingHelper(
             CallSummary.CallCategory category
     );
 
@@ -26,7 +26,9 @@ public interface PriorityQueueRepository {
             CallSummary.CallCategory category
     );
 
-    Optional<String> findWaitingHelpee(List<CategoryCount> categoryCounts);
+    Optional<String> claimWaitingHelpee(
+            List<CategoryCount> categoryCounts
+    );
 
     boolean removeHelpee(String helpeeSessionId);
 

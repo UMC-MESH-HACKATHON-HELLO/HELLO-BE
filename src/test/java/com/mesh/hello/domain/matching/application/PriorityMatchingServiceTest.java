@@ -42,7 +42,7 @@ class PriorityMatchingServiceTest {
     @Test
     @DisplayName("매칭 가능한 helper를 선점하면 helper 세션을 반환한다")
     void matchHelper_returnsRemovedHelper() {
-        given(priorityQueueRepository.findWaitingHelper(CallSummary.CallCategory.SMARTPHONE))
+        given(priorityQueueRepository.claimWaitingHelper(CallSummary.CallCategory.SMARTPHONE))
                 .willReturn(Optional.of("helper-1"));
         given(priorityQueueRepository.removeHelper("helper-1")).willReturn(true);
 
@@ -55,7 +55,7 @@ class PriorityMatchingServiceTest {
     @Test
     @DisplayName("선점 경쟁에 세 번 실패하면 helpee를 원래 카테고리로 대기시킨다")
     void matchHelper_queuesHelpeeAfterThreeFailedClaims() {
-        given(priorityQueueRepository.findWaitingHelper(CallSummary.CallCategory.KIOSK))
+        given(priorityQueueRepository.claimWaitingHelper(CallSummary.CallCategory.KIOSK))
                 .willReturn(Optional.of("helper-1"));
         given(priorityQueueRepository.removeHelper("helper-1")).willReturn(false);
 
@@ -74,7 +74,7 @@ class PriorityMatchingServiceTest {
         );
         given(sessionAccountRepository.findUserId("helper-session")).willReturn(Optional.of(7L));
         given(callSummaryRepository.findCompletedCategoryCountByHelperId(7L)).willReturn(counts);
-        given(priorityQueueRepository.findWaitingHelpee(counts)).willReturn(Optional.of("helpee-1"));
+        given(priorityQueueRepository.claimWaitingHelpee(counts)).willReturn(Optional.of("helpee-1"));
         given(priorityQueueRepository.getHelpeeCategory("helpee-1"))
                 .willReturn(Optional.of(CallSummary.CallCategory.SMARTPHONE));
         given(priorityQueueRepository.removeHelpee("helpee-1")).willReturn(true);
@@ -84,7 +84,7 @@ class PriorityMatchingServiceTest {
         assertThat(result).contains(new PriorityMatchingService.MatchedHelpee(
                 "helpee-1", CallSummary.CallCategory.SMARTPHONE
         ));
-        verify(priorityQueueRepository).findWaitingHelpee(counts);
+        verify(priorityQueueRepository).claimWaitingHelpee(counts);
     }
 
     @Test
@@ -96,7 +96,7 @@ class PriorityMatchingServiceTest {
         given(sessionAccountRepository.findUserId("guest-helper")).willReturn(Optional.empty());
         given(callSummaryRepository.findCompletedCategoriesByHelperSessionId("guest-helper"))
                 .willReturn(counts);
-        given(priorityQueueRepository.findWaitingHelpee(counts)).willReturn(Optional.empty());
+        given(priorityQueueRepository.claimWaitingHelpee(counts)).willReturn(Optional.empty());
 
         Optional<PriorityMatchingService.MatchedHelpee> result = service.registerHelper("guest-helper");
 
@@ -111,7 +111,7 @@ class PriorityMatchingServiceTest {
         given(sessionAccountRepository.findUserId("helper-1")).willReturn(Optional.empty());
         given(callSummaryRepository.findCompletedCategoriesByHelperSessionId("helper-1"))
                 .willReturn(counts);
-        given(priorityQueueRepository.findWaitingHelpee(anyList()))
+        given(priorityQueueRepository.claimWaitingHelpee(anyList()))
                 .willReturn(Optional.of("stale-helpee"))
                 .willReturn(Optional.empty());
         given(priorityQueueRepository.getHelpeeCategory("stale-helpee")).willReturn(Optional.empty());

@@ -64,7 +64,7 @@ class RedisPriorityQueueRepositoryTest {
         ));
         repository.pushHelper("helper-without-history", List.of());
 
-        assertThat(repository.findWaitingHelper(CallSummary.CallCategory.SMARTPHONE))
+        assertThat(repository.claimWaitingHelper(CallSummary.CallCategory.SMARTPHONE))
                 .contains("helper-with-history");
     }
 
@@ -74,7 +74,7 @@ class RedisPriorityQueueRepositoryTest {
         repository.pushHelper("first-helper", List.of());
         repository.pushHelper("second-helper", List.of());
 
-        assertThat(repository.findWaitingHelper(CallSummary.CallCategory.KIOSK))
+        assertThat(repository.claimWaitingHelper(CallSummary.CallCategory.KIOSK))
                 .contains("first-helper");
     }
 
@@ -84,7 +84,7 @@ class RedisPriorityQueueRepositoryTest {
         repository.pushHelpee("road-guide-helpee", CallSummary.CallCategory.ROAD_GUIDE);
         repository.pushHelpee("smartphone-helpee", CallSummary.CallCategory.SMARTPHONE);
 
-        assertThat(repository.findWaitingHelpee(List.of(
+        assertThat(repository.claimWaitingHelpee(List.of(
                 new CategoryCount(CallSummary.CallCategory.SMARTPHONE, 2L)
         ))).contains("smartphone-helpee");
     }

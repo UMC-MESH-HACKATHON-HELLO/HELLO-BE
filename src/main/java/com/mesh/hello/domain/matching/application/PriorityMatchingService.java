@@ -31,7 +31,7 @@ public class PriorityMatchingService {
         for (int attempt = 0; attempt < 3; attempt++) {
 
             Optional<String> helpee =
-                    priorityQueueRepository.findWaitingHelpee(categoryCounts);
+                    priorityQueueRepository.claimWaitingHelpee(categoryCounts);
 
             if (helpee.isEmpty()) {
                 break;
@@ -75,7 +75,7 @@ public class PriorityMatchingService {
         for (int attempt = 0; attempt < 3; attempt++) {
             Optional<String> helper =
                     priorityQueueRepository
-                            .findWaitingHelper(
+                            .claimWaitingHelper(
                                     category
                             );
 
