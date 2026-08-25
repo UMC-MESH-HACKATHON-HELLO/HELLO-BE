@@ -35,6 +35,10 @@ public enum ErrorCode {
     KAKAO_TOKEN_FAILED(502, "카카오 토큰 발급에 실패했습니다."),
     KAKAO_USER_INFO_FAILED(502, "카카오 사용자 정보 조회에 실패했습니다."),
 
+    // 정책(약관/개인정보처리방침)
+    INVALID_POLICY_TYPE(400, "존재하지 않는 정책 유형입니다."),
+    POLICY_NOT_FOUND(404, "등록된 정책 내용이 없습니다."),
+
     INTERNAL_ERROR(500, "서버 내부 오류가 발생했습니다."),
     NO_HELPER_SEQUENCE(500, "HELPER_SEQUENCE가 존재하지 않습니다."),
     NO_HELPEE_SEQUENCE(500, "HELPEE_SEQUENCE가 존재하지 않습니다.")

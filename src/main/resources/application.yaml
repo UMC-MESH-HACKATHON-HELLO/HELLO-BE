@@ -15,11 +15,17 @@ spring:
     database: mysql
     database-platform: org.hibernate.dialect.MySQLDialect
     show-sql: true
+    defer-datasource-initialization: true
     hibernate:
       ddl-auto: update
     properties:
       hibernate:
         format_sql: true
+
+  sql:
+    init:
+      mode: always
+      encoding: UTF-8
 
   data:
     redis:
