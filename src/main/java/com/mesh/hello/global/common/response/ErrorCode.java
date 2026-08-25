@@ -39,7 +39,10 @@ public enum ErrorCode {
     INVALID_POLICY_TYPE(400, "존재하지 않는 정책 유형입니다."),
     POLICY_NOT_FOUND(404, "등록된 정책 내용이 없습니다."),
 
-    INTERNAL_ERROR(500, "서버 내부 오류가 발생했습니다.");
+    INTERNAL_ERROR(500, "서버 내부 오류가 발생했습니다."),
+    NO_HELPER_SEQUENCE(500, "HELPER_SEQUENCE가 존재하지 않습니다."),
+    NO_HELPEE_SEQUENCE(500, "HELPEE_SEQUENCE가 존재하지 않습니다.")
+    ;
 
     private final int code;
     private final String message;

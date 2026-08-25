@@ -1,5 +1,6 @@
 package com.mesh.hello.domain.calling.application;
 
+import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
 import com.mesh.hello.domain.calling.domain.CallSummary;
 import com.mesh.hello.domain.calling.repository.CallSummaryRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,9 @@ class GeminiSummarizationServiceTest {
     @Mock
     private SimpMessagingTemplate messagingTemplate;
 
+    @Mock
+    private SessionAccountRepository sessionAccountRepository;
+
     private GeminiSummarizationService service;
 
     private CallSummary pending;
@@ -50,10 +54,11 @@ class GeminiSummarizationServiceTest {
     @BeforeEach
     void setUp() {
         service = new GeminiSummarizationService(
-                geminiRestClient, callSummaryRepository, persistenceService, messagingTemplate);
+                geminiRestClient, callSummaryRepository, persistenceService, messagingTemplate,
+                sessionAccountRepository);
         ReflectionTestUtils.setField(service, "apiKey", "test-api-key");
 
-        pending = new CallSummary("room-1", "helpee-1", "helper-1", 120);
+        pending = new CallSummary("room-1", "helpee-1", "helper-1", 120, null);
         given(callSummaryRepository.findTopByRoomIdOrderByIdDesc("room-1")).willReturn(Optional.of(pending));
     }
 

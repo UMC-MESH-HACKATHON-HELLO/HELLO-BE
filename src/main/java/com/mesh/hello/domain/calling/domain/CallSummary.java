@@ -3,6 +3,7 @@ package com.mesh.hello.domain.calling.domain;
 import com.fasterxml.jackson.annotation.JsonValue;
 import jakarta.persistence.*;
 import lombok.AccessLevel;
+import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,6 +29,10 @@ public class CallSummary {
     @Column(nullable = false)
     private String helperSessionId;
 
+    // FK로 굳이 두진 않았음
+    @Column(nullable = true)
+    private Long helperId;
+
     @Column(columnDefinition = "TEXT")
     private String transcript;
 
@@ -50,13 +55,21 @@ public class CallSummary {
     private LocalDateTime completedAt;
 
     /** 통화 종료 직후, AI 요약이 완성되기 전 PENDING 상태로 먼저 저장한다. */
-    public CallSummary(String roomId, String helpeeSessionId, String helperSessionId, int durationSec) {
+    @Builder
+    public CallSummary(
+            String roomId,
+            String helpeeSessionId,
+            String helperSessionId,
+            int durationSec,
+            Long helperId
+    ) {
         this.roomId = roomId;
         this.helpeeSessionId = helpeeSessionId;
         this.helperSessionId = helperSessionId;
         this.durationSec = durationSec;
         this.status = SummaryStatus.PENDING;
         this.createdAt = LocalDateTime.now();
+        this.helperId = helperId;
     }
 
     /** AI 요약이 완성되면 원문·요약 텍스트·도움 카테고리를 채우고 COMPLETED로 전환한다. */
