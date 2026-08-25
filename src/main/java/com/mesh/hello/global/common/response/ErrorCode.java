@@ -21,6 +21,7 @@ public enum ErrorCode {
     INVALID_PAGING(400, "page/size 파라미터가 올바르지 않습니다."),
     SUMMARY_PENDING(202, "요약을 생성하고 있습니다."),
     SUMMARY_FAILED(500, "AI 요약 생성에 실패했습니다."),
+    INVALID_CATEGORY(400, "존재하지 않는 도움 카테고리입니다."),
 
     // 인증/로그인
     LOGIN_FAILED(401, "아이디 또는 비밀번호가 일치하지 않습니다."),
