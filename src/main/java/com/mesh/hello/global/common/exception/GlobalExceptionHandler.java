@@ -5,6 +5,7 @@ import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
@@ -71,6 +72,25 @@ public class GlobalExceptionHandler {
         return ResponseEntity
                 .status(representative.getCode())
                 .body(ApiResponse.error(representative.getCode(), representative.getMessage()));
+    }
+
+    /**
+     * 요청 본문을 읽지 못했을 때(깨진 JSON, 잘못된 UTF-8, JSON↔타입 불일치 등).
+     *
+     * <p>메시지 변환 단계에서 터지므로 {@code @Valid}보다 앞선다. 클라이언트 입력 오류이니
+     * {@link ErrorCode#INVALID_REQUEST_BODY}(400)로 응답한다.</p>
+     *
+     * <p>파싱 실패 예외 메시지에는 실패 지점 주변의 요청 본문 조각이 들어갈 수 있으므로,
+     * 응답에도 로그에도 원문을 남기지 않는다. 로그에는 예외 클래스명만 남긴다
+     * (앞선 커밋들과 동일 원칙).</p>
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNotReadable(HttpMessageNotReadableException e) {
+        log.warn("요청 본문을 읽을 수 없음: exception={}", e.getMostSpecificCause().getClass().getName());
+        return ResponseEntity
+                .status(ErrorCode.INVALID_REQUEST_BODY.getCode())
+                .body(ApiResponse.error(ErrorCode.INVALID_REQUEST_BODY.getCode(),
+                        ErrorCode.INVALID_REQUEST_BODY.getMessage()));
     }
 
     /**

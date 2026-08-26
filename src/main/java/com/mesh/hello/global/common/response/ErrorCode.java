@@ -19,6 +19,7 @@ public enum ErrorCode {
     ALREADY_IN_CALL(409, "이미 통화 중입니다."),
     NOT_FOUND(404, "대상 룸 또는 요청을 찾을 수 없습니다."),
     INVALID_PAGING(400, "page/size 파라미터가 올바르지 않습니다."),
+    INVALID_REQUEST_BODY(400, "요청 본문을 읽을 수 없습니다."),
     SUMMARY_PENDING(202, "요약을 생성하고 있습니다."),
     SUMMARY_FAILED(500, "AI 요약 생성에 실패했습니다."),
 
@@ -38,7 +39,6 @@ public enum ErrorCode {
 
     // 탈퇴
     ALREADY_WITHDRAWN(400, "이미 탈퇴한 계정입니다."),
-    WITHDRAW_BLOCKED_BY_CALL(409, "진행 중인 통화가 있어 탈퇴할 수 없습니다."),
 
     // 카카오 OAuth
     OAUTH_STATE_MISMATCH(401, "OAuth state 값이 유효하지 않습니다."),
