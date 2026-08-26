@@ -75,12 +75,15 @@ public class UserController {
     // 회원 탈퇴
     // ──────────────────────────────────────────────
 
-    @Operation(summary = "회원 탈퇴", description = "현재 로그인된 계정을 탈퇴 처리합니다. 세션이 즉시 만료됩니다.")
+    @Operation(
+        summary = "회원 탈퇴",
+        description = "현재 로그인된 계정을 탈퇴 처리합니다. 요청 본문은 없으며 세션 인증이 필요합니다. "
+                + "탈퇴가 완료되면 세션이 즉시 만료되고 JSESSIONID 쿠키가 제거됩니다."
+    )
     @ApiResponses({
         @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "200", description = "탈퇴 성공"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401", description = "인증 필요"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "400", description = "이미 탈퇴한 계정"),
-        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "409", description = "진행 중인 통화 있음")
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(responseCode = "401",
+                description = "인증되지 않았거나, 이미 탈퇴했거나, 세션이 만료된 경우")
     })
     @DeleteMapping("/users/me")
     public ApiResponse<Void> withdraw(

@@ -1,6 +1,7 @@
 package com.mesh.hello.domain.auth.dto;
 
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.Email;
 import jakarta.validation.constraints.NotBlank;
@@ -27,20 +28,44 @@ import jakarta.validation.constraints.Size;
 public class SignupRequest {
 
     /** 영문/숫자/언더스코어 3~20자. 예약 접두사(kakao_ · deleted_) 차단은 서비스 레이어에서 수행. */
+    @Schema(
+            description = "로그인 아이디. 영문 대소문자·숫자·언더스코어(_) 3~20자. "
+                    + "kakao_ 또는 deleted_ 로 시작하는 값은 시스템 예약어라 사용할 수 없습니다.",
+            example = "helperKim01",
+            requiredMode = Schema.RequiredMode.REQUIRED
+    )
     @NotBlank(message = "INVALID_USERNAME_FORMAT")
     @Pattern(regexp = "^[a-zA-Z0-9_]{3,20}$", message = "INVALID_USERNAME_FORMAT")
     private String username;
 
     /** 영문+숫자를 모두 포함한 8~20자. 특수문자는 선택. */
+    @Schema(
+            description = "비밀번호. 8~20자이며 영문자와 숫자를 각각 1자 이상 포함해야 합니다. "
+                    + "특수문자는 넣어도 되고 안 넣어도 됩니다.",
+            example = "helperPw01",
+            requiredMode = Schema.RequiredMode.REQUIRED
+    )
     @NotBlank(message = "INVALID_PASSWORD_FORMAT")
     @Pattern(regexp = "^(?=.*[a-zA-Z])(?=.*[0-9]).{8,20}$", message = "INVALID_PASSWORD_FORMAT")
     private String password;
 
     /** 비밀번호 확인. password와 일치 여부는 {@link #isPasswordConfirmValid()}로 검증. */
+    @Schema(
+            description = "비밀번호 확인. password와 정확히 같은 값을 보내야 하며, "
+                    + "다르면 PASSWORD_CONFIRM_MISMATCH 오류가 발생합니다.",
+            example = "helperPw01",
+            requiredMode = Schema.RequiredMode.REQUIRED
+    )
     @NotBlank(message = "PASSWORD_CONFIRM_MISMATCH")
     private String passwordConfirm;
 
     /** 이메일 주소. 최대 100자, 이메일 형식. */
+    @Schema(
+            description = "이메일 주소. 이메일 형식이어야 하며 최대 100자입니다. "
+                    + "저장 시 앞뒤 공백 제거 후 소문자로 정규화됩니다.",
+            example = "helper@example.com",
+            requiredMode = Schema.RequiredMode.REQUIRED
+    )
     @NotBlank(message = "INVALID_EMAIL_FORMAT")
     @Email(message = "INVALID_EMAIL_FORMAT")
     @Size(max = 100, message = "INVALID_EMAIL_FORMAT")
@@ -51,9 +76,21 @@ public class SignupRequest {
      * null 또는 빈 문자열("")은 허용한다(프론트가 빈 문자열을 보낼 수 있음).
      * 값이 존재하고 비어있지 않을 때만 2~20자 규칙 적용 — {@link #isNicknameValid()} 참고.
      */
+    @Schema(
+            description = "닉네임(선택). 생략하거나 빈 문자열이면 username이 닉네임으로 사용됩니다. "
+                    + "값을 넣을 경우 2~20자여야 합니다.",
+            example = "김도우미",
+            requiredMode = Schema.RequiredMode.NOT_REQUIRED
+    )
     private String nickname;
 
     /** 개인정보 수집·이용 동의. true만 허용. */
+    @Schema(
+            description = "개인정보 수집·이용 동의 여부. true만 허용되며, "
+                    + "false 또는 누락 시 PRIVACY_AGREEMENT_REQUIRED 오류가 발생합니다.",
+            example = "true",
+            requiredMode = Schema.RequiredMode.REQUIRED
+    )
     @NotNull(message = "PRIVACY_AGREEMENT_REQUIRED")
     @AssertTrue(message = "PRIVACY_AGREEMENT_REQUIRED")
     private Boolean privacyAgreed;
@@ -104,6 +141,7 @@ public class SignupRequest {
      * <p>password 또는 passwordConfirm이 null/빈값이면 각 필드의 @NotBlank가 먼저 잡으므로
      * 여기서는 일치 여부만 확인한다. null 비교는 false를 반환해 mismatch 에러를 낸다.</p>
      */
+    @Schema(hidden = true) // 검증용 파생 getter — 요청 필드가 아니므로 OpenAPI 스키마에서 제외
     @AssertTrue(message = "PASSWORD_CONFIRM_MISMATCH")
     public boolean isPasswordConfirmValid() {
         if (password == null || passwordConfirm == null) {
@@ -116,6 +154,7 @@ public class SignupRequest {
      * 닉네임 길이 검증. null 또는 빈 문자열("")은 허용한다(선택값).
      * 값이 존재하고 비어있지 않을 때만 2~20자를 검사한다.
      */
+    @Schema(hidden = true) // 검증용 파생 getter — 요청 필드가 아니므로 OpenAPI 스키마에서 제외
     @AssertTrue(message = "INVALID_NICKNAME_FORMAT")
     public boolean isNicknameValid() {
         if (nickname == null || nickname.isEmpty()) {
