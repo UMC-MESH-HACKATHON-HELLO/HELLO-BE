@@ -38,6 +38,12 @@ import static org.mockito.Mockito.verify;
  * case-insensitive이므로 {@code KAKAO_123}과 {@code kakao_123}이 동일한 유니크 자리를 차지한다.
  * 비교를 {@code startsWith}(case-sensitive)로만 하면 {@code KAKAO_} · {@code KaKaO_} 등
  * 대소문자 변형이 검증을 통과해 선점 공격이 가능해진다.</p>
+ *
+ * <p>{@code deleted_} 접두사 회귀 시나리오: {@link com.mesh.hello.domain.user.domain.User#withdraw}가
+ * 탈퇴 계정의 username을 {@code deleted_<id>}({@link com.mesh.hello.domain.user.domain.User#WITHDRAWN_USERNAME_PREFIX})로
+ * 익명화한다. 로컬 가입에서 이 접두사를 막지 않으면 누군가 {@code deleted_<id>}를 선점해
+ * 해당 id 사용자의 탈퇴를 유니크 제약 위반으로 롤백시킬 수 있다(카카오 unlink는 익명화보다
+ * 먼저 호출되므로, 카카오 연결은 끊겼는데 탈퇴는 실패한 불일치 상태가 된다).</p>
  */
 @ExtendWith(MockitoExtension.class)
 class AuthServiceTest {
@@ -125,21 +131,56 @@ class AuthServiceTest {
     }
 
     @Nested
-    @DisplayName("signup - username 형식 검증")
-    class FormatValidationTest {
+    @DisplayName("signup - deleted_ 접두사 예약어 차단")
+    class WithdrawnPrefixTest {
 
-        @ParameterizedTest
-        @ValueSource(strings = {"ab", "user name", "유저이름", "user!!", ""})
-        @DisplayName("허용되지 않는 형식의 username은 INVALID_USERNAME_FORMAT 에러를 던진다")
-        void invalidFormatUsername_isRejected(String invalidUsername) {
-            SignupRequest request = new SignupRequest(invalidUsername, "password123", "닉네임");
+        @Test
+        @DisplayName("username이 deleted_로 시작하면 RESERVED_USERNAME_PREFIX 에러를 던지고 저장하지 않는다")
+        void deletedPrefixUsername_isRejected() {
+            // given: 탈퇴 시 username은 deleted_<id>로 익명화된다(User#withdraw).
+            // 공격자가 deleted_42를 선점하면 id=42 사용자의 탈퇴가 유니크 제약 위반으로 롤백된다.
+            SignupRequest request = new SignupRequest("deleted_42", "password123", "닉네임");
 
             assertThatThrownBy(() -> authService.signup(request))
                     .isInstanceOf(BusinessException.class)
                     .extracting(e -> ((BusinessException) e).getErrorCode())
-                    .isEqualTo(ErrorCode.INVALID_USERNAME_FORMAT);
+                    .isEqualTo(ErrorCode.RESERVED_USERNAME_PREFIX);
 
+            verify(userRepository, never()).existsByUsername(anyString());
             verify(userRepository, never()).save(any(User.class));
+        }
+
+        @ParameterizedTest(name = "[{index}] username=\"{0}\"")
+        @ValueSource(strings = {
+                "DELETED_42",   // 전체 대문자
+                "Deleted_42",   // 첫 글자만 대문자
+                "DeLeTeD_99",   // 혼합 대소문자
+                "deleted_",     // 접두사만
+        })
+        @DisplayName("deleted_ 접두사의 대소문자 변형도 RESERVED_USERNAME_PREFIX 에러를 던진다")
+        void deletedPrefixCaseVariants_areRejected(String usernameVariant) {
+            SignupRequest request = new SignupRequest(usernameVariant, "password123", "닉네임");
+
+            assertThatThrownBy(() -> authService.signup(request))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.RESERVED_USERNAME_PREFIX);
+
+            verify(userRepository, never()).existsByUsername(anyString());
+            verify(userRepository, never()).save(any(User.class));
+        }
+
+        @Test
+        @DisplayName("언더스코어 없는 'deleted'는 예약어가 아니므로 중복 검사 단계까지 진행된다")
+        void plainDeletedWithoutUnderscore_isNotReserved() {
+            // deleted_<id> 형태만 시스템이 생성하므로, 언더스코어 없는 'deleted'는 충돌 불가 → 차단하지 않는다.
+            SignupRequest request = new SignupRequest("deleted", "password123", "닉네임");
+            given(userRepository.existsByUsername("deleted")).willReturn(true);
+
+            assertThatThrownBy(() -> authService.signup(request))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.DUPLICATE_USERNAME);
         }
     }
 

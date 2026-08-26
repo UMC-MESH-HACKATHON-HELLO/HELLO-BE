@@ -64,6 +64,8 @@ public class SecurityConfig {
                         // 도우미 포인트 내역 조회
                         .requestMatchers("/api/v1/helper/points/**").authenticated()
                         .requestMatchers("/api/v1/helper/**").authenticated()
+                        // 탈퇴 등 사용자 본인 정보 수정 (로그인 필수)
+                        .requestMatchers("/api/v1/users/**").authenticated()
                         // 그 외는 무인증 허용 — 어르신/익명 플로우가 막히면 안 됨
                         .anyRequest().permitAll()
                 )
