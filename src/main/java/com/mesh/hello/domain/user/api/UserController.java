@@ -26,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.security.Principal;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 @Tag(name = "User", description = "사용자 API")
@@ -49,7 +50,7 @@ public class UserController {
         List<GrantedAuthority> authorities = AuthorityUtils.createAuthorityList(role);
         AnonymousAuthenticationToken customAnonymousToken = new AnonymousAuthenticationToken(
                 "key_for_anonymous",
-                "anonymousUser_" + role.toLowerCase(),
+                "anonymousUser_" + role.toLowerCase(Locale.ROOT),
                 authorities
         );
         SecurityContext context = SecurityContextHolder.createEmptyContext();

@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -118,7 +119,11 @@ public class AuthService {
         }
 
         // email 정규화: trim + 소문자 (대소문자만 다른 중복 가입 방지)
-        String email = request.email() != null ? request.email().trim().toLowerCase() : null;
+        // 이 값은 중복 검사와 저장에 모두 쓰이므로, 배포 환경의 JVM 기본 로케일(예: 터키어에서
+        // 'I' → 'ı')에 결과가 좌우되지 않도록 Locale.ROOT로 고정한다.
+        String email = request.email() != null
+                ? request.email().trim().toLowerCase(Locale.ROOT)
+                : null;
         if (email != null && userRepository.existsByEmail(email)) {
             throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
         }
