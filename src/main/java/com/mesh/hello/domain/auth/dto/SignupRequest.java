@@ -11,9 +11,9 @@ import jakarta.validation.constraints.Size;
 /**
  * 회원가입 요청 DTO.
  *
- * <p>username은 영문/숫자/언더스코어 3~20자여야 하며, {@code kakao_} 접두사는
- * 카카오 소셜 로그인 유저의 내부 username 생성에 사용되는 예약어라 로컬 가입에서는 거부된다.
- * {@code kakao_} 차단은 Bean Validation으로 표현하기 어려우므로
+ * <p>username은 영문/숫자/언더스코어 3~20자여야 하며, 시스템이 내부적으로 생성하는
+ * 예약 접두사({@code kakao_} · {@code deleted_})로 시작하는 값은 로컬 가입에서는 거부된다.
+ * 예약 접두사 차단은 Bean Validation으로 표현하기 어려우므로
  * {@link com.mesh.hello.domain.auth.application.AuthService#signup}에서 수행한다.</p>
  *
  * <p>각 필드의 {@code message} 속성에는 {@link com.mesh.hello.global.common.response.ErrorCode}
@@ -26,7 +26,7 @@ import jakarta.validation.constraints.Size;
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
 public class SignupRequest {
 
-    /** 영문/숫자/언더스코어 3~20자. kakao_ 접두사 차단은 서비스 레이어에서 수행. */
+    /** 영문/숫자/언더스코어 3~20자. 예약 접두사(kakao_ · deleted_) 차단은 서비스 레이어에서 수행. */
     @NotBlank(message = "INVALID_USERNAME_FORMAT")
     @Pattern(regexp = "^[a-zA-Z0-9_]{3,20}$", message = "INVALID_USERNAME_FORMAT")
     private String username;

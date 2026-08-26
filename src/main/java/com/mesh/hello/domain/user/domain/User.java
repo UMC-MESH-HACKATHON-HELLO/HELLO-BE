@@ -51,6 +51,16 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
 public class User extends BaseEntity {
 
+    /**
+     * 탈퇴 계정의 username 익명화 접두사. 탈퇴 시 username은 {@code deleted_<id>}가 된다({@link #withdraw}).
+     *
+     * <p>로컬 회원가입에서는 예약어로 차단된다
+     * ({@link com.mesh.hello.domain.auth.application.AuthService#signup}).
+     * id가 유일하므로 이 접두사만 막으면 탈퇴 시 username 충돌이 구조적으로 불가능하다
+     * (누군가 {@code deleted_<id>}를 선점하면 해당 id 사용자의 탈퇴가 유니크 제약 위반으로 롤백된다).</p>
+     */
+    public static final String WITHDRAWN_USERNAME_PREFIX = "deleted_";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -180,7 +190,7 @@ public class User extends BaseEntity {
      * @param anonymizedPassword BCrypt로 인코딩된 의미 없는 임의 문자열
      */
     public void withdraw(String anonymizedPassword) {
-        this.username = "deleted_" + this.id;
+        this.username = WITHDRAWN_USERNAME_PREFIX + this.id;
         this.nickname = "탈퇴한 사용자";
         this.password = anonymizedPassword;
         this.email = null;

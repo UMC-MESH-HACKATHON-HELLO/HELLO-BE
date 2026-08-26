@@ -81,17 +81,23 @@ public class AuthService {
     }
 
     /**
-     * 로컬 회원가입. 입력값 정규화 → kakao_ 접두사 차단 → 중복 검사 → 저장.
+     * 로컬 회원가입. 입력값 정규화 → 예약 접두사 차단 → 중복 검사 → 저장.
      *
      * <p>username 형식 검증(영문/숫자/언더스코어 3~20자)은 {@link SignupRequest}의
      * Bean Validation(@Pattern)으로 컨트롤러 레이어에서 사전 차단된다.
-     * 서비스에는 @Valid로 표현하기 어려운 {@code kakao_} 예약어 차단만 남긴다.</p>
+     * 서비스에는 @Valid로 표현하기 어려운 예약 접두사 차단만 남긴다.</p>
      *
-     * <p>{@code kakao_} 접두사는 {@link KakaoOAuthService}가 소셜 유저의 내부 username을
-     * {@code kakao_<providerId>} 형태로 결정적으로 생성하는 데 사용하는 예약어다.
-     * 로컬 가입에서 이 접두사를 허용하면, 실제 카카오 유저가 가입/로그인하기 전에
-     * 동일한 username을 로컬 계정이 선점해 카카오 로그인이 막히는 문제가 생긴다
-     * (username은 전역 유니크 컬럼).</p>
+     * <p>차단하는 내부 예약 접두사(username은 전역 유니크 컬럼이라, 로컬 가입이 선점하면
+     * 시스템이 생성하는 username과 충돌한다):
+     * <ul>
+     *   <li>{@code kakao_} — {@link KakaoOAuthService}가 소셜 유저의 내부 username을
+     *       {@code kakao_<providerId>} 형태로 결정적으로 생성한다. 로컬 계정이 선점하면
+     *       실제 카카오 유저의 가입/로그인이 막힌다.</li>
+     *   <li>{@code deleted_} — {@link User#withdraw}가 탈퇴 계정의 username을
+     *       {@code deleted_<id>}로 익명화한다. 로컬 계정이 선점하면 해당 id 사용자의 탈퇴가
+     *       유니크 제약 위반으로 롤백된다(카카오 unlink는 익명화보다 먼저 호출되므로,
+     *       카카오 연결은 끊겼는데 탈퇴는 실패한 불일치 상태가 된다).</li>
+     * </ul>
      *
      * <p>비교는 대소문자를 무시한다. MySQL의 기본 collation(utf8mb4_0900_ai_ci)은
      * case-insensitive이므로 {@code KAKAO_123}과 {@code kakao_123}이 같은 유니크 자리를
@@ -102,10 +108,9 @@ public class AuthService {
     public Long signup(SignupRequest request) {
         String username = request.username() != null ? request.username().trim() : null;
 
-        // regionMatches(ignoreCase=true)로 대소문자 변형(KAKAO_, KaKaO_ 등)을 모두 차단
-        if (username != null && username.regionMatches(true, 0,
-                KakaoOAuthService.USERNAME_PREFIX, 0,
-                KakaoOAuthService.USERNAME_PREFIX.length())) {
+        // 내부 예약 접두사 차단. regionMatches(ignoreCase=true)로 대소문자 변형(KAKAO_, Deleted_ 등)까지 모두 막는다.
+        if (hasReservedPrefix(username, KakaoOAuthService.USERNAME_PREFIX)
+                || hasReservedPrefix(username, User.WITHDRAWN_USERNAME_PREFIX)) {
             throw new BusinessException(ErrorCode.RESERVED_USERNAME_PREFIX);
         }
         if (userRepository.existsByUsername(username)) {
@@ -126,6 +131,18 @@ public class AuthService {
                 Boolean.TRUE.equals(request.privacyAgreed())
         );
         return userRepository.save(user).getId();
+    }
+
+    /**
+     * {@code username}이 주어진 예약 접두사로 시작하는지 대소문자 무관하게 검사한다.
+     *
+     * <p>{@code "deleted"}처럼 접두사({@code "deleted_"})보다 짧아 언더스코어가 없는 값은
+     * {@code regionMatches}가 false를 반환하므로 차단되지 않는다. 시스템이 생성하는 username은
+     * 항상 {@code <접두사>+식별자} 형태라, 언더스코어 없는 값은 애초에 충돌할 수 없다.</p>
+     */
+    private static boolean hasReservedPrefix(String username, String prefix) {
+        return username != null
+                && username.regionMatches(true, 0, prefix, 0, prefix.length());
     }
 
     /**

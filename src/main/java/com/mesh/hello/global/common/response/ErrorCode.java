@@ -33,7 +33,7 @@ public enum ErrorCode {
     PASSWORD_CONFIRM_MISMATCH(400, "비밀번호와 비밀번호 확인이 일치하지 않습니다."),
     PRIVACY_AGREEMENT_REQUIRED(400, "개인정보 수집 및 이용에 동의해야 합니다."),
     DUPLICATE_EMAIL(409, "이미 사용 중인 이메일입니다."),
-    RESERVED_USERNAME_PREFIX(400, "카카오 로그인 전용으로 예약된 사용자명 형식입니다."),
+    RESERVED_USERNAME_PREFIX(400, "예약어로 사용할 수 없는 사용자명 형식입니다."),
     KAKAO_USERNAME_CONFLICT(409, "카카오 로그인에 실패했습니다. 관리자에게 문의해주세요."),
 
     // 탈퇴
