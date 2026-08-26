@@ -198,4 +198,17 @@ public class User extends BaseEntity {
         this.deleted = true;
         this.deletedAt = LocalDateTime.now();
     }
+
+    /**
+     * 비밀번호 변경.
+     *
+     * <p>{@code encodedPassword}는 BCrypt로 인코딩된 값이어야 한다(평문 금지).
+     * 인코딩 책임은 서비스 레이어에 있다({@link com.mesh.hello.domain.user.application.UserService}).
+     * {@code updatedAt}은 {@link BaseEntity}가 자동 갱신한다.</p>
+     *
+     * @param encodedPassword BCrypt 해시 비밀번호
+     */
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
 }

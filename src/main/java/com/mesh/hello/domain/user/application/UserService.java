@@ -2,6 +2,7 @@ package com.mesh.hello.domain.user.application;
 
 import com.mesh.hello.domain.auth.application.KakaoOAuthService;
 import com.mesh.hello.domain.user.domain.User;
+import com.mesh.hello.domain.user.dto.ChangePasswordRequest;
 import com.mesh.hello.domain.user.dto.HelperInfoResponse;
 import com.mesh.hello.domain.user.enums.Provider;
 import com.mesh.hello.domain.user.repository.UserRepository;
@@ -30,6 +31,51 @@ public class UserService {
         User user = userRepository.findByUsernameAndDeletedFalse(username)
                 .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
         return new HelperInfoResponse(user.getId(), user.getUsername(), user.getNickname(), user.getPoints());
+    }
+
+    /**
+     * 로그인된 도우미 본인의 비밀번호를 변경한다.
+     *
+     * <p>검증·처리 순서에 이유가 있다:
+     * <ol>
+     *   <li>활성 계정 조회 — 없으면 {@link ErrorCode#UNAUTHORIZED}.</li>
+     *   <li><b>소셜 계정 차단</b> — LOCAL이 아니면 {@link ErrorCode#SOCIAL_ACCOUNT_PASSWORD_CHANGE_NOT_ALLOWED}.
+     *       현재 비밀번호 검사(3)보다 먼저 해야, 비밀번호가 UUID의 BCrypt 해시라 사용자가 알 수 없는
+     *       카카오 계정에 "현재 비밀번호가 틀렸다"는 잘못된 안내를 하지 않는다.</li>
+     *   <li>현재 비밀번호 일치 확인 — 불일치면 {@link ErrorCode#PASSWORD_MISMATCH}.</li>
+     *   <li><b>새 비밀번호가 현재와 동일한지</b> — 동일하면 {@link ErrorCode#SAME_AS_CURRENT_PASSWORD}.
+     *       반드시 현재 비밀번호 확인(3) 뒤에 둔다. 앞에 두면 현재 비밀번호를 모르는 사람이 임의의
+     *       문자열을 넣어 그게 이 계정의 비밀번호인지 떠볼 수 있다.</li>
+     *   <li>새 비밀번호를 BCrypt로 인코딩해 도메인 메서드로 반영. 명시적 save는 하지 않는다
+     *       (트랜잭션 커밋 시 JPA 변경 감지로 저장, {@code updatedAt}은 {@code BaseEntity}가 갱신).</li>
+     * </ol>
+     *
+     * @param username 현재 로그인 세션의 username (Principal.getName() 값)
+     * @param request  현재/새 비밀번호
+     */
+    @Transactional
+    public void changePasswordByUsername(String username, ChangePasswordRequest request) {
+        // 1) 활성 계정 조회
+        User user = userRepository.findByUsernameAndDeletedFalse(username)
+                .orElseThrow(() -> new BusinessException(ErrorCode.UNAUTHORIZED));
+
+        // 2) 소셜 계정 차단 — 현재 비밀번호 검사보다 먼저(카카오 계정에 잘못된 안내 방지)
+        if (user.getProvider() != Provider.LOCAL) {
+            throw new BusinessException(ErrorCode.SOCIAL_ACCOUNT_PASSWORD_CHANGE_NOT_ALLOWED);
+        }
+
+        // 3) 현재 비밀번호 일치 확인
+        if (!passwordEncoder.matches(request.currentPassword(), user.getPassword())) {
+            throw new BusinessException(ErrorCode.PASSWORD_MISMATCH);
+        }
+
+        // 4) 새 비밀번호가 현재와 동일한지 — 반드시 현재 비밀번호 확인(3) 뒤에서 검사(떠보기 방지)
+        if (passwordEncoder.matches(request.newPassword(), user.getPassword())) {
+            throw new BusinessException(ErrorCode.SAME_AS_CURRENT_PASSWORD);
+        }
+
+        // 5) 반영 — 명시적 save 금지(더티 체킹). updatedAt은 BaseEntity가 갱신한다.
+        user.changePassword(passwordEncoder.encode(request.newPassword()));
     }
 
     /**
