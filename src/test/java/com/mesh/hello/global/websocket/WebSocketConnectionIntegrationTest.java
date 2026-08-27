@@ -29,10 +29,14 @@ import java.util.List;
  * 웹소켓 연결 토대(1단계)가 기능적으로 멀쩡한지를 격리 검증하는 통합 테스트.
  *
  * <p>다른 파트(대기 큐·매칭·LiveKit)가 전혀 없다고 가정하고, ping/pong 한 번으로
- * (1) 연결, (2) 익명 Principal 등록, (3) 개인 큐 라우팅(/user/queue) 세 가지를 동시에 확인한다.</p>
+ * (1) 연결, (2) 익명 Principal 등록, (3) 개인 큐 라우팅(/user/api/v1/queue) 세 가지를 동시에 확인한다.</p>
  *
- * <p>실제 서버를 랜덤 포트로 띄우고(@SpringBootTest), 진짜 STOMP 클라이언트로 /ws에 붙어
+ * <p>실제 서버를 랜덤 포트로 띄우고(@SpringBootTest), 진짜 STOMP 클라이언트로 /api/v1/ws에 붙어
  * end-to-end로 검증한다. 인터셉터만 따로 보는 단위 테스트보다 "진짜 도는지"를 확실히 보여준다.</p>
+ *
+ * <p>목적지 경로는 {@link com.mesh.hello.global.websocket.config.WebSocketMessageBrokerConfig}와
+ * 맞춘다: 엔드포인트 {@code /api/v1/ws}, 앱 prefix {@code /api/v1}, 개인 큐
+ * {@code /user/api/v1/queue/pong}({@code @SendToUser("/api/v1/queue/pong")}).</p>
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 class WebSocketConnectionIntegrationTest {
@@ -51,7 +55,7 @@ class WebSocketConnectionIntegrationTest {
 
     private String wsUrl(String query) {
         // withSockJS() 엔드포인트는 http(s) 스킴을 쓴다.
-        return "http://localhost:" + port + "/ws" + query;
+        return "http://localhost:" + port + "/api/v1/ws" + query;
     }
 
     /**
@@ -68,7 +72,7 @@ class WebSocketConnectionIntegrationTest {
             .connectAsync(wsUrl("?sessionId=" + givenSessionId), new StompSessionHandlerAdapter() {})
             .get(5, TimeUnit.SECONDS);
 
-        session.subscribe("/user/queue/pong", new StompFrameHandler() {
+        session.subscribe("/user/api/v1/queue/pong", new StompFrameHandler() {
             @Override
             @NonNull
             public Type getPayloadType(@NonNull StompHeaders headers) {
@@ -81,7 +85,7 @@ class WebSocketConnectionIntegrationTest {
             }
         });
 
-        session.send("/app/ping", new byte[0]);
+        session.send("/api/v1/ping", new byte[0]);
 
         PongMessage pong = pongFuture.get(5, TimeUnit.SECONDS);
         assertThat(pong).isNotNull();
@@ -103,7 +107,7 @@ class WebSocketConnectionIntegrationTest {
             .connectAsync(wsUrl(""), new StompSessionHandlerAdapter() {})
             .get(5, TimeUnit.SECONDS);
 
-        session.subscribe("/user/queue/pong", new StompFrameHandler() {
+        session.subscribe("/user/api/v1/queue/pong", new StompFrameHandler() {
             @Override
             @NonNull
             public Type getPayloadType(@NonNull StompHeaders headers) {
@@ -116,7 +120,7 @@ class WebSocketConnectionIntegrationTest {
             }
         });
 
-        session.send("/app/ping", new byte[0]);
+        session.send("/api/v1/ping", new byte[0]);
 
         PongMessage pong = pongFuture.get(5, TimeUnit.SECONDS);
         assertThat(pong).isNotNull();
@@ -146,11 +150,11 @@ class WebSocketConnectionIntegrationTest {
             .connectAsync(wsUrl("?sessionId=" + idB), new StompSessionHandlerAdapter() {})
             .get(5, TimeUnit.SECONDS);
 
-        sessionA.subscribe("/user/queue/pong", frameHandler(futureA));
-        sessionB.subscribe("/user/queue/pong", frameHandler(futureB));
+        sessionA.subscribe("/user/api/v1/queue/pong", frameHandler(futureA));
+        sessionB.subscribe("/user/api/v1/queue/pong", frameHandler(futureB));
 
-        sessionA.send("/app/ping", new byte[0]);
-        sessionB.send("/app/ping", new byte[0]);
+        sessionA.send("/api/v1/ping", new byte[0]);
+        sessionB.send("/api/v1/ping", new byte[0]);
 
         assertThat(futureA.get(5, TimeUnit.SECONDS).sessionId()).isEqualTo(idA);
         assertThat(futureB.get(5, TimeUnit.SECONDS).sessionId()).isEqualTo(idB);
@@ -181,8 +185,8 @@ class WebSocketConnectionIntegrationTest {
                 new StompSessionHandlerAdapter() {})
             .get(5, TimeUnit.SECONDS);
 
-        session.subscribe("/user/queue/pong", frameHandler(pongFuture));
-        session.send("/app/ping", new byte[0]);
+        session.subscribe("/user/api/v1/queue/pong", frameHandler(pongFuture));
+        session.send("/api/v1/ping", new byte[0]);
 
         PongMessage pong = pongFuture.get(5, TimeUnit.SECONDS);
         assertThat(pong.sessionId()).isEqualTo(fromConnectHeader);
