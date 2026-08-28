@@ -3,6 +3,7 @@ package com.mesh.hello.global.websocket.config;
 import com.mesh.hello.global.websocket.interceptor.AnonymousPrincipalChannelInterceptor;
 import com.mesh.hello.global.websocket.interceptor.SessionIdHandshakeInterceptor;
 import com.mesh.hello.global.websocket.interceptor.ShutdownAwareHandshakeInterceptor;
+import com.mesh.hello.global.websocket.interceptor.SubscriptionAuthorizationInterceptor;
 import com.mesh.hello.global.websocket.interceptor.WebSocketRateLimitInterceptor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
@@ -24,7 +25,7 @@ import org.springframework.web.socket.config.annotation.WebSocketMessageBrokerCo
  *   <li>엔드포인트 {@code /api/v1/ws} (SockJS) + 핸드셰이크 인터셉터 2종(종료거부, sessionId 확정)</li>
  *   <li>심플 브로커 {@code /api/v1/topic}, {@code /api/v1/queue} + heartbeat 4000/4000 + 전용 TaskScheduler</li>
  *   <li>애플리케이션 prefix {@code /api/v1}</li>
- *   <li>인바운드 채널 인터셉터: 익명 Principal 등록 → rate limit</li>
+ *   <li>인바운드 채널 인터셉터: 익명 Principal 등록 → 구독 인가 검증 → rate limit</li>
  * </ul>
  */
 @Configuration
@@ -35,6 +36,7 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
     private final SessionIdHandshakeInterceptor sessionIdHandshakeInterceptor;
     private final ShutdownAwareHandshakeInterceptor shutdownAwareHandshakeInterceptor;
     private final AnonymousPrincipalChannelInterceptor anonymousPrincipalChannelInterceptor;
+    private final SubscriptionAuthorizationInterceptor subscriptionAuthorizationInterceptor;
     private final WebSocketRateLimitInterceptor webSocketRateLimitInterceptor;
 
     /** 심플 브로커 heartbeat 전용 스케줄러. */
@@ -48,9 +50,19 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
 
     @Override
     public void registerStompEndpoints(StompEndpointRegistry registry) {
+        // sessionId를 HttpSession(JSESSIONID 쿠키) 기반으로 신뢰하는 이상, 이 엔드포인트를
+        // 전체 origin에 열어두면 다른 origin의 페이지가 피해자 브라우저의 쿠키를 실어
+        // 핸드셰이크를 보내는 것만으로 그 사람 행세를 할 수 있다. REST API와 동일한
+        // 화이트리스트로 제한한다(SecurityConfig.corsConfigurationSource() 참고).
         registry.addEndpoint("/api/v1/ws")
             .addInterceptors(shutdownAwareHandshakeInterceptor, sessionIdHandshakeInterceptor)
-            .setAllowedOriginPatterns("*")
+            .setAllowedOrigins(
+                "http://localhost:3000",
+                "http://localhost:5173",
+                "https://hello.sublumen.xyz",
+                "https://hello-fe-bay.vercel.app",
+                "https://hello-fe-git-main-jungbin.vercel.app"
+            )
             .withSockJS();
     }
 
@@ -64,9 +76,10 @@ public class WebSocketMessageBrokerConfig implements WebSocketMessageBrokerConfi
 
     @Override
     public void configureClientInboundChannel(ChannelRegistration registration) {
-        // 순서 중요: Principal 등록(CONNECT) → rate limit(SEND).
+        // 순서 중요: Principal 등록(CONNECT) → 구독 인가 검증(SUBSCRIBE) → rate limit(SEND).
         registration.interceptors(
             anonymousPrincipalChannelInterceptor,
+            subscriptionAuthorizationInterceptor,
             webSocketRateLimitInterceptor
         );
     }
