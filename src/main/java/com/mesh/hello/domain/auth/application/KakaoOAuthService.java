@@ -8,9 +8,11 @@ import com.mesh.hello.domain.user.repository.UserRepository;
 import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ErrorCode;
 import com.mesh.hello.global.config.KakaoOAuthProperties;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,10 +48,35 @@ public class KakaoOAuthService {
     /** 카카오 소셜 유저의 내부 username 접두사. 로컬 회원가입에서는 예약어로 차단된다({@link AuthService#signup}). */
     public static final String USERNAME_PREFIX = "kakao_";
 
+    /**
+     * unlink 전용 RestClient 타임아웃 — connect 2초, read 3초.
+     *
+     * <p>공용 빈({@code RestClientConfig})의 기본값(각 5초)보다 짧게 잡는다.
+     * unlink는 탈퇴 트랜잭션 안에서 실행되는 단발성 호출이므로 빠른 실패가 중요하다.
+     * 공용 빈을 수정하면 토큰 발급/사용자 정보 조회 타임아웃도 같이 바뀌므로
+     * 별도 인스턴스로 분리한다.</p>
+     */
+    private static final int UNLINK_CONNECT_MILLIS = 2_000;
+    private static final int UNLINK_READ_MILLIS = 3_000;
+
     private final KakaoOAuthProperties kakaoProps;
     private final RestClient restClient;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+
+    /** unlink 전용 RestClient. 공용 빈과 분리해 타임아웃을 독립적으로 제어한다. */
+    private RestClient unlinkRestClient;
+
+    @PostConstruct
+    void initUnlinkRestClient() {
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(UNLINK_CONNECT_MILLIS);
+        factory.setReadTimeout(UNLINK_READ_MILLIS);
+
+        unlinkRestClient = RestClient.builder()
+                .requestFactory(factory)
+                .build();
+    }
 
     // -----------------------------------------------------------------------
     // 1. 인가 URL 생성
@@ -208,5 +235,44 @@ public class KakaoOAuthService {
                     );
                     return userRepository.save(newUser);
                 });
+    }
+
+    // -----------------------------------------------------------------------
+    // 5. 카카오 연결 끊기 (탈퇴 시 호출)
+    // -----------------------------------------------------------------------
+
+    /**
+     * Admin Key 방식으로 카카오 연결 끊기(unlink) API를 호출한다.
+     *
+     * <p>카카오 unlink API:
+     * {@code POST https://kapi.kakao.com/v1/user/unlink}
+     * {@code Authorization: KakaoAK {ADMIN_KEY}}
+     * body: {@code target_id_type=user_id&target_id={providerId}}</p>
+     *
+     * <p>타임아웃: connect {@value UNLINK_CONNECT_MILLIS}ms / read {@value UNLINK_READ_MILLIS}ms.
+     * 공용 {@link RestClient} 빈(각 5초)과 별도의 인스턴스를 사용하므로
+     * 토큰 발급 / 사용자 정보 조회 타임아웃에 영향을 주지 않는다.</p>
+     *
+     * <p>실패 시 이 메서드가 예외를 던진다. 호출자({@link com.mesh.hello.domain.user.application.UserService})가
+     * try-catch로 감싸고 있으므로 unlink 실패가 탈퇴 흐름을 막지는 않는다.</p>
+     *
+     * @param providerId 카카오 회원번호 ({@link User#getProviderId()})
+     */
+    public void unlink(String providerId) {
+        MultiValueMap<String, String> formData = new LinkedMultiValueMap<>();
+        formData.add("target_id_type", "user_id");
+        formData.add("target_id", providerId);
+
+        unlinkRestClient.post()
+                .uri(kakaoProps.unlinkUri())
+                .header("Authorization", "KakaoAK " + kakaoProps.adminKey())
+                .contentType(MediaType.APPLICATION_FORM_URLENCODED)
+                .body(formData)
+                .retrieve()
+                .onStatus(status -> status.isError(), (req, res) -> {
+                    log.warn("카카오 unlink HTTP 오류: {}", res.getStatusCode());
+                    throw new RestClientException("카카오 unlink 실패: HTTP " + res.getStatusCode());
+                })
+                .toBodilessEntity();
     }
 }

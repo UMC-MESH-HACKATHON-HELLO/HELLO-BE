@@ -12,6 +12,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
 import java.util.List;
+import java.util.Locale;
 import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -39,9 +40,6 @@ public class AuthService {
 
     /** 익명 sessionId를 전달받는 키(요청 헤더 / HttpSession 속성 공통). */
     private static final String SESSION_ID_KEY = "sessionId";
-
-    /** 로컬 회원가입 username 허용 형식: 영문/숫자/언더스코어 3~20자. */
-    private static final String USERNAME_FORMAT = "^[a-zA-Z0-9_]{3,20}$";
 
     private final AuthenticationManager authenticationManager;
     private final SecurityContextRepository securityContextRepository;
@@ -84,13 +82,23 @@ public class AuthService {
     }
 
     /**
-     * 최소 회원가입(범위 밖이지만 시연용). username 형식 검증 + 중복 체크 + BCrypt 저장.
+     * 로컬 회원가입. 입력값 정규화 → 예약 접두사 차단 → 중복 검사 → 저장.
      *
-     * <p>{@code kakao_} 접두사는 {@link KakaoOAuthService}가 소셜 유저의 내부 username을
-     * {@code kakao_<providerId>} 형태로 결정적으로 생성하는 데 사용하는 예약어다.
-     * 로컬 가입에서 이 접두사를 허용하면, 실제 카카오 유저가 가입/로그인하기 전에
-     * 동일한 username을 로컬 계정이 선점해 카카오 로그인이 막히는 문제가 생긴다
-     * (username은 전역 유니크 컬럼).</p>
+     * <p>username 형식 검증(영문/숫자/언더스코어 3~20자)은 {@link SignupRequest}의
+     * Bean Validation(@Pattern)으로 컨트롤러 레이어에서 사전 차단된다.
+     * 서비스에는 @Valid로 표현하기 어려운 예약 접두사 차단만 남긴다.</p>
+     *
+     * <p>차단하는 내부 예약 접두사(username은 전역 유니크 컬럼이라, 로컬 가입이 선점하면
+     * 시스템이 생성하는 username과 충돌한다):
+     * <ul>
+     *   <li>{@code kakao_} — {@link KakaoOAuthService}가 소셜 유저의 내부 username을
+     *       {@code kakao_<providerId>} 형태로 결정적으로 생성한다. 로컬 계정이 선점하면
+     *       실제 카카오 유저의 가입/로그인이 막힌다.</li>
+     *   <li>{@code deleted_} — {@link User#withdraw}가 탈퇴 계정의 username을
+     *       {@code deleted_<id>}로 익명화한다. 로컬 계정이 선점하면 해당 id 사용자의 탈퇴가
+     *       유니크 제약 위반으로 롤백된다(카카오 unlink는 익명화보다 먼저 호출되므로,
+     *       카카오 연결은 끊겼는데 탈퇴는 실패한 불일치 상태가 된다).</li>
+     * </ul>
      *
      * <p>비교는 대소문자를 무시한다. MySQL의 기본 collation(utf8mb4_0900_ai_ci)은
      * case-insensitive이므로 {@code KAKAO_123}과 {@code kakao_123}이 같은 유니크 자리를
@@ -99,25 +107,47 @@ public class AuthService {
      */
     @Transactional
     public Long signup(SignupRequest request) {
-        String username = request.username();
-        if (username == null || !username.matches(USERNAME_FORMAT)) {
-            throw new BusinessException(ErrorCode.INVALID_USERNAME_FORMAT);
-        }
-        // regionMatches(ignoreCase=true)로 대소문자 변형(KAKAO_, KaKaO_ 등)을 모두 차단
-        if (username.regionMatches(true, 0,
-                KakaoOAuthService.USERNAME_PREFIX, 0,
-                KakaoOAuthService.USERNAME_PREFIX.length())) {
+        String username = request.username() != null ? request.username().trim() : null;
+
+        // 내부 예약 접두사 차단. regionMatches(ignoreCase=true)로 대소문자 변형(KAKAO_, Deleted_ 등)까지 모두 막는다.
+        if (hasReservedPrefix(username, KakaoOAuthService.USERNAME_PREFIX)
+                || hasReservedPrefix(username, User.WITHDRAWN_USERNAME_PREFIX)) {
             throw new BusinessException(ErrorCode.RESERVED_USERNAME_PREFIX);
         }
         if (userRepository.existsByUsername(username)) {
             throw new BusinessException(ErrorCode.DUPLICATE_USERNAME);
         }
-        User user = User.builder()
-                .username(username)
-                .password(passwordEncoder.encode(request.password()))
-                .nickname(request.nickname())
-                .build();
+
+        // email 정규화: trim + 소문자 (대소문자만 다른 중복 가입 방지)
+        // 이 값은 중복 검사와 저장에 모두 쓰이므로, 배포 환경의 JVM 기본 로케일(예: 터키어에서
+        // 'I' → 'ı')에 결과가 좌우되지 않도록 Locale.ROOT로 고정한다.
+        String email = request.email() != null
+                ? request.email().trim().toLowerCase(Locale.ROOT)
+                : null;
+        if (email != null && userRepository.existsByEmail(email)) {
+            throw new BusinessException(ErrorCode.DUPLICATE_EMAIL);
+        }
+
+        User user = User.createLocal(
+                username,
+                passwordEncoder.encode(request.password()),
+                request.nickname(),
+                email,
+                Boolean.TRUE.equals(request.privacyAgreed())
+        );
         return userRepository.save(user).getId();
+    }
+
+    /**
+     * {@code username}이 주어진 예약 접두사로 시작하는지 대소문자 무관하게 검사한다.
+     *
+     * <p>{@code "deleted"}처럼 접두사({@code "deleted_"})보다 짧아 언더스코어가 없는 값은
+     * {@code regionMatches}가 false를 반환하므로 차단되지 않는다. 시스템이 생성하는 username은
+     * 항상 {@code <접두사>+식별자} 형태라, 언더스코어 없는 값은 애초에 충돌할 수 없다.</p>
+     */
+    private static boolean hasReservedPrefix(String username, String prefix) {
+        return username != null
+                && username.regionMatches(true, 0, prefix, 0, prefix.length());
     }
 
     /**
@@ -188,8 +218,8 @@ public class AuthService {
     /**
      * User 객체를 기준으로 권한 목록을 결정한다.
      *
-     * <p>현재는 모든 도우미에게 {@code ROLE_HELPER}를 부여한다.
-     * 향후 {@code UserRole} 필드를 추가할 경우 여기서 분기하면 된다.</p>
+     * <p>어르신은 {@code users} 테이블에 행을 갖지 않고 익명 세션으로만 동작한다.
+     * 따라서 이 메서드에 도달하는 사용자는 반드시 도우미이므로 {@code ROLE_HELPER}를 부여한다.</p>
      */
     private List<GrantedAuthority> resolveAuthorities(User user) {
         return List.of(new SimpleGrantedAuthority("ROLE_HELPER"));
