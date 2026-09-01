@@ -2,6 +2,7 @@ package com.mesh.hello.domain.matching.application;
 
 import com.mesh.hello.domain.auth.repository.SessionAccountRepository;
 import com.mesh.hello.domain.calling.application.GeminiSummarizationService;
+import com.mesh.hello.domain.calling.domain.CallSummary;
 import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
@@ -33,7 +34,7 @@ import java.util.concurrent.ConcurrentHashMap;
 @RequiredArgsConstructor
 public class MatchingService {
 
-    private final MatchingQueueRepository matchingQueueRepository;
+    // private final MatchingQueueRepository matchingQueueRepository;
     private final MatchingRoomRepository matchingRoomRepository;
     private final SimpMessagingTemplate messagingTemplate;
     private final LiveKitService liveKitService;
@@ -42,6 +43,7 @@ public class MatchingService {
     private final SessionAccountRepository sessionAccountRepository;
     private final PointService pointService;
     private final ForbiddenWordDetectionRepository forbiddenWordDetectionRepository;
+    private final PriorityMatchingService priorityMatchingService;
 
     /**
      * 큐에서 pop됐지만 아직 방 저장이 끝나지 않은(LiveKit 토큰 발급 중인) helper 세션 집합.
@@ -56,18 +58,25 @@ public class MatchingService {
      * 대기 중인 도우미(helper)가 있으면 즉시 매칭해 양측에 MATCHED + LiveKit 토큰을 전송한다.
      * 도우미가 없으면 helpee를 대기열에 넣고 NO_HELPER를 전송한다.
      */
-    public void requestMatch(String helpeeSessionId) {
+    public void requestMatch(
+            String helpeeSessionId,
+            CallSummary.CallCategory category
+    ) {
         String helperSessionId;
         synchronized (helperLock) {
-            Optional<String> helperOpt = matchingQueueRepository.popWaitingHelper();
+
+            Optional<String> helperOpt =
+                    priorityMatchingService.matchHelper(helpeeSessionId, category);
+
             if (helperOpt.isEmpty()) {
-                matchingQueueRepository.pushHelpee(helpeeSessionId);
+
                 messagingTemplate.convertAndSend(
                         "/api/v1/queue/signal/" + helpeeSessionId,
                         ApiResponse.ok("대기 중인 도우미가 없습니다.", Map.of("type", "NO_HELPER"))
                 );
                 return;
             }
+
             helperSessionId = helperOpt.get();
             helpersBeingMatched.add(helperSessionId);
         }
@@ -96,7 +105,7 @@ public class MatchingService {
         } catch (Exception e) {
             // 토큰 발급 실패 시 도우미 다시 큐에 넣고 helpee에게 실패 알림
             synchronized (helperLock) {
-                matchingQueueRepository.pushHelper(helperSessionId);
+                priorityMatchingService.restoreHelper(helperSessionId);
                 helpersBeingMatched.remove(helperSessionId);
             }
             messagingTemplate.convertAndSend(
@@ -106,23 +115,36 @@ public class MatchingService {
         }
     }
 
+    @Deprecated(since="CallCategory를 함께 전달해주세요.")
+    public void requestMatch(
+            String helpeeSessionId
+    ) {
+        requestMatch(helpeeSessionId, CallSummary.CallCategory.ETC);
+    }
+
     /**
      * 도우미(helper)가 대기열에 등록된다.
      * 대기 중인 도움 요청자(helpee)가 있으면 즉시 매칭을 시도한다.
      */
     public void registerHelper(String helperSessionId) {
-        Optional<String> helpeeOpt = matchingQueueRepository.popWaitingHelpee();
+        Optional<PriorityMatchingService.MatchedHelpee> helpeeOpt;
 
-        if (helpeeOpt.isEmpty()) {
-            matchingQueueRepository.pushHelper(helperSessionId);
-            messagingTemplate.convertAndSend(
-                    "/api/v1/queue/signal/" + helperSessionId,
-                    ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
-            );
-            return;
+        synchronized (helperLock) {
+            helpeeOpt = priorityMatchingService.registerHelper(helperSessionId);
+
+            if (helpeeOpt.isEmpty()) {
+                messagingTemplate.convertAndSend(
+                        "/api/v1/queue/signal/" + helperSessionId,
+                        ApiResponse.ok("대기열에 등록되었습니다.", Map.of("type", "WAITING"))
+                );
+                return;
+            }
+
+            helpersBeingMatched.add(helperSessionId);
         }
 
-        String helpeeSessionId = helpeeOpt.get();
+        PriorityMatchingService.MatchedHelpee helpee = helpeeOpt.get();
+        String helpeeSessionId = helpee.sessionId();
         String roomId = UUID.randomUUID().toString();
 
         try {
@@ -131,6 +153,10 @@ public class MatchingService {
 
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
+
+            synchronized (helperLock) {
+                helpersBeingMatched.remove(helperSessionId);
+            }
 
             messagingTemplate.convertAndSend(
                     "/api/v1/queue/signal/" + helpeeSessionId,
@@ -144,8 +170,11 @@ public class MatchingService {
             );
 
         } catch (Exception e) {
-            matchingQueueRepository.pushHelpee(helpeeSessionId);
-            matchingQueueRepository.pushHelper(helperSessionId);
+            synchronized (helperLock) {
+                priorityMatchingService.restoreHelpee(helpeeSessionId, helpee.category());
+                priorityMatchingService.restoreHelper(helperSessionId);
+                helpersBeingMatched.remove(helperSessionId);
+            }
         }
     }
 
@@ -166,7 +195,7 @@ public class MatchingService {
      */
     public void stopHelperWaiting(String helperSessionId) {
         synchronized (helperLock) {
-            if (matchingQueueRepository.removeHelper(helperSessionId)) {
+            if (priorityMatchingService.removeWaitingHelper(helperSessionId)) {
                 return;
             }
             if (helpersBeingMatched.contains(helperSessionId)) {
@@ -183,44 +212,42 @@ public class MatchingService {
      * 통화를 정상 종료한다. 방에 있는 양측 모두에게 ENDED를 전송하고 방을 삭제한다.
      * 로그인된 도우미였다면 통화 완료 포인트를 적립한다.
      *
+     * <p>양쪽이 거의 동시에 종료를 호출하는 경우를 허용하기 위해 방이 이미 없으면(먼저 종료된 경우)
+     * 조용히 통과시키지만, 방이 존재하는데 sessionId가 그 방의 참가자가 아니면 거부한다.
+     * roomId만 알면(또는 추측하면) 참가자가 아닌 클라이언트가 남의 통화를 강제 종료할 수 있는
+     * 문제를 막기 위함이다.</p>
+     *
      * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있고, 금지어 감지로 인한 강제 종료
      * ({@link #onForbiddenWordDetected})와도 경합할 수 있으므로 {@link MatchingRoom#markClosing()}의
-     * CAS 결과로 오직 하나의 종료 경로만 진행되도록 한다. 이미 다른 경로가 선점했다면 그쪽이 방 삭제와
-     * 브로드캐스트까지 책임지므로 여기서는 조용히 반환한다(그 대신 {@code deleteByRoomId}는 남겨
-     * 방어적으로 이중 체크한다).</p>
-     *
-     * <p>포인트 적립은 {@code PointHistory.roomId}의 유니크 제약으로 같은 방에 대해
-     * 한 번만 반영되며, 적립이 실패하더라도 ENDED 브로드캐스트는 항상 수행한다.</p>
+     * 원자적 CAS 결과로 "최초 종료 요청"을 가려낸다. 종료 처리(녹취 flush·요약·포인트 적립·ENDED 발행)는
+     * markClosing()에 성공한 호출 하나만 수행한다 — 진 쪽은 이미 이긴 쪽이 같은 topic으로 ENDED를
+     * 보내므로 별도 처리가 필요 없고, 무거운 녹취 요약이 중복 실행되는 것도 막는다. 방이 애초에
+     * 존재하지 않으면(roomOpt 비어있음) 이 블록에 들어가지 않으므로 존재하지 않는 방으로 ENDED가
+     * 새 나가는 일도 없다.</p>
      */
     public void endCall(String sessionId, String roomId) {
-        MatchingRoom room = matchingRoomRepository.findByRoomId(roomId).orElse(null);
-        if (room == null) {
-            return;
-        }
-        if (!room.contains(sessionId)) {
-            throw new BusinessException(ErrorCode.ROLE_NOT_ALLOWED);
-        }
-        if (!room.markClosing()) {
-            return;
+        Optional<MatchingRoom> roomOpt = matchingRoomRepository.findByRoomId(roomId);
+        if (roomOpt.isPresent() && !roomOpt.get().contains(sessionId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_SESSION);
         }
 
-        String transcript = transcribeService.flushTranscript(roomId);
-        int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
-        geminiSummarizationService.markPending(
-                roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
-        geminiSummarizationService.summarizeAndNotify(
-                roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
+        roomOpt.filter(MatchingRoom::markClosing).ifPresent(room -> {
+            String transcript = transcribeService.flushTranscript(roomId);
+            int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
+            geminiSummarizationService.markPending(
+                    roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), durationSec);
+            geminiSummarizationService.summarizeAndNotify(
+                    roomId, room.getHelpeeSessionId(), room.getHelperSessionId(), transcript);
 
-        if (matchingRoomRepository.deleteByRoomId(roomId).isEmpty()) {
-            return;
-        }
+            if (matchingRoomRepository.deleteByRoomId(roomId).isPresent()) {
+                awardPointsSafely(room.getHelperSessionId(), roomId);
+            }
 
-        awardPointsSafely(room.getHelperSessionId(), roomId);
-
-        messagingTemplate.convertAndSend(
-                "/api/v1/topic/room/" + roomId,
-                (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
-        );
+            messagingTemplate.convertAndSend(
+                    "/api/v1/topic/room/" + roomId,
+                    (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
+            );
+        });
     }
 
     /**
@@ -287,6 +314,20 @@ public class MatchingService {
     }
 
     /**
+     * sessionId가 roomId 방의 실제 참가자인지 검증한다. 방이 없거나 참가자가 아니면 예외를 던진다.
+     *
+     * <p>{@code /signal/{roomId}}로 임의의 roomId에 SDP/ICE를 주입해 남의 통화에 끼어드는 것을
+     * 막기 위해, 시그널을 중계하기 전에 발신자가 그 방의 당사자인지 확인한다.</p>
+     */
+    public void assertParticipant(String sessionId, String roomId) {
+        MatchingRoom room = matchingRoomRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (!room.contains(sessionId)) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_SESSION);
+        }
+    }
+
+    /**
      * 세션 연결이 끊겼을 때 정리 작업을 수행한다.
      * 대기열에서 제거하고, 통화 중이었다면 상대방에게 PARTNER_DISCONNECTED를 전송한다.
      *
@@ -295,8 +336,7 @@ public class MatchingService {
      * 여기서는 아무 것도 하지 않는다.</p>
      */
     public void handleDisconnect(String sessionId) {
-        matchingQueueRepository.removeHelper(sessionId);
-        matchingQueueRepository.removeHelpee(sessionId);
+        priorityMatchingService.removeWaitingParticipant(sessionId);
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
             if (!room.markClosing()) {

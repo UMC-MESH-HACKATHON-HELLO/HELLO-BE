@@ -19,6 +19,8 @@ public enum ErrorCode {
     ALREADY_IN_CALL(409, "이미 통화 중입니다."),
     NOT_FOUND(404, "대상 룸 또는 요청을 찾을 수 없습니다."),
     INVALID_PAGING(400, "page/size 파라미터가 올바르지 않습니다."),
+    FORBIDDEN_SESSION(403, "본인 소유가 아닌 세션 또는 통화방입니다."),
+    INVALID_REQUEST_BODY(400, "요청 본문을 읽을 수 없습니다."),
     SUMMARY_PENDING(202, "요약을 생성하고 있습니다."),
     SUMMARY_FAILED(500, "AI 요약 생성에 실패했습니다."),
 
@@ -27,15 +29,31 @@ public enum ErrorCode {
     UNAUTHORIZED(401, "인증이 필요합니다."),
     DUPLICATE_USERNAME(409, "이미 사용 중인 사용자명입니다."),
     INVALID_USERNAME_FORMAT(400, "사용자명은 영문/숫자/언더스코어 3~20자여야 합니다."),
-    RESERVED_USERNAME_PREFIX(400, "카카오 로그인 전용으로 예약된 사용자명 형식입니다."),
+    INVALID_PASSWORD_FORMAT(400, "비밀번호는 영문·숫자를 포함한 8~20자여야 합니다."),
+    INVALID_EMAIL_FORMAT(400, "이메일 형식이 올바르지 않습니다."),
+    INVALID_NICKNAME_FORMAT(400, "닉네임은 2~20자여야 합니다."),
+    PASSWORD_CONFIRM_MISMATCH(400, "비밀번호와 비밀번호 확인이 일치하지 않습니다."),
+    PRIVACY_AGREEMENT_REQUIRED(400, "개인정보 수집 및 이용에 동의해야 합니다."),
+    DUPLICATE_EMAIL(409, "이미 사용 중인 이메일입니다."),
+    RESERVED_USERNAME_PREFIX(400, "예약어로 사용할 수 없는 사용자명 형식입니다."),
     KAKAO_USERNAME_CONFLICT(409, "카카오 로그인에 실패했습니다. 관리자에게 문의해주세요."),
+
+    // 탈퇴
+    ALREADY_WITHDRAWN(400, "이미 탈퇴한 계정입니다."),
 
     // 카카오 OAuth
     OAUTH_STATE_MISMATCH(401, "OAuth state 값이 유효하지 않습니다."),
     KAKAO_TOKEN_FAILED(502, "카카오 토큰 발급에 실패했습니다."),
     KAKAO_USER_INFO_FAILED(502, "카카오 사용자 정보 조회에 실패했습니다."),
 
-    INTERNAL_ERROR(500, "서버 내부 오류가 발생했습니다.");
+    // 정책(약관/개인정보처리방침)
+    INVALID_POLICY_TYPE(400, "존재하지 않는 정책 유형입니다."),
+    POLICY_NOT_FOUND(404, "등록된 정책 내용이 없습니다."),
+
+    INTERNAL_ERROR(500, "서버 내부 오류가 발생했습니다."),
+    NO_HELPER_SEQUENCE(500, "HELPER_SEQUENCE가 존재하지 않습니다."),
+    NO_HELPEE_SEQUENCE(500, "HELPEE_SEQUENCE가 존재하지 않습니다.")
+    ;
 
     private final int code;
     private final String message;

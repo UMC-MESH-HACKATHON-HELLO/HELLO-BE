@@ -55,17 +55,18 @@ class WebSocketConnectionIntegrationTest {
     }
 
     /**
-     * 시나리오 1 — sessionId를 쿼리파라미터로 직접 주면, pong에 그 값이 그대로 돌아온다.
-     * 핸드셰이크 인터셉터의 "쿼리파라미터 우선" 경로 + 개인 큐 배달을 검증한다.
+     * 시나리오 1 — 클라이언트가 쿼리파라미터로 sessionId를 자칭해도 더 이상 반영되지 않는다.
+     * (과거엔 이 값을 그대로 신뢰해 스푸핑에 악용될 수 있었다 — HttpSession 기반으로 바뀐 뒤
+     * 클라이언트가 채운 값은 항상 무시되고 서버가 발급한 값만 쓰인다.)
      */
     @Test
-    @DisplayName("쿼리파라미터로 준 sessionId가 pong으로 그대로 에코된다")
-    void echoesProvidedSessionId() throws Exception {
-        String givenSessionId = "test-session-abc";
+    @DisplayName("쿼리파라미터로 자칭한 sessionId는 무시되고 서버 발급 값이 쓰인다")
+    void ignoresClientSuppliedSessionIdQueryParam() throws Exception {
+        String claimedSessionId = "victim-session-id";
         CompletableFuture<PongMessage> pongFuture = new CompletableFuture<>();
 
         StompSession session = newStompClient()
-            .connectAsync(wsUrl("?sessionId=" + givenSessionId), new StompSessionHandlerAdapter() {})
+            .connectAsync(wsUrl("?sessionId=" + claimedSessionId), new StompSessionHandlerAdapter() {})
             .get(5, TimeUnit.SECONDS);
 
         session.subscribe("/user/queue/pong", new StompFrameHandler() {
@@ -85,7 +86,8 @@ class WebSocketConnectionIntegrationTest {
 
         PongMessage pong = pongFuture.get(5, TimeUnit.SECONDS);
         assertThat(pong).isNotNull();
-        assertThat(pong.sessionId()).isEqualTo(givenSessionId);
+        assertThat(pong.sessionId()).isNotEqualTo(claimedSessionId);
+        assertThat(pong.sessionId()).hasSize(36); // 서버가 발급한 UUID
 
         session.disconnect();
     }
@@ -127,23 +129,25 @@ class WebSocketConnectionIntegrationTest {
     }
 
     /**
-     * 시나리오 3 — 서로 다른 sessionId로 붙은 두 클라이언트가 각자 본인 것만 받는다.
+     * 시나리오 3 — 서로 다른 세션으로 붙은 두 클라이언트가 각자 본인 것만 받는다.
      * @SendToUser 기반 1:1 배달(다른 사람 메시지가 새지 않음)을 검증한다.
      * 매칭에서 MATCHED를 엉뚱한 사람에게 보내면 끝장이므로 이 격리가 토대의 핵심이다.
+     *
+     * <p>sessionId는 이제 서버가 발급하므로(클라이언트가 지정 불가) 미리 알 수 없다 —
+     * 각자 pong으로 받은 sessionId가 서로 다르다는 사실 자체로 세션이 분리돼 있음을,
+     * 그리고 A/B가 각자 본인 pong만 받았다는 사실로 배달 격리를 확인한다.</p>
      */
     @Test
-    @DisplayName("두 클라이언트가 각자 본인 sessionId만 받는다 (배달 격리)")
+    @DisplayName("두 클라이언트가 각자 본인 것만 받는다 (배달 격리)")
     void deliversOnlyToOwner() throws Exception {
-        String idA = "session-A";
-        String idB = "session-B";
         CompletableFuture<PongMessage> futureA = new CompletableFuture<>();
         CompletableFuture<PongMessage> futureB = new CompletableFuture<>();
 
         StompSession sessionA = newStompClient()
-            .connectAsync(wsUrl("?sessionId=" + idA), new StompSessionHandlerAdapter() {})
+            .connectAsync(wsUrl(""), new StompSessionHandlerAdapter() {})
             .get(5, TimeUnit.SECONDS);
         StompSession sessionB = newStompClient()
-            .connectAsync(wsUrl("?sessionId=" + idB), new StompSessionHandlerAdapter() {})
+            .connectAsync(wsUrl(""), new StompSessionHandlerAdapter() {})
             .get(5, TimeUnit.SECONDS);
 
         sessionA.subscribe("/user/queue/pong", frameHandler(futureA));
@@ -152,20 +156,25 @@ class WebSocketConnectionIntegrationTest {
         sessionA.send("/app/ping", new byte[0]);
         sessionB.send("/app/ping", new byte[0]);
 
-        assertThat(futureA.get(5, TimeUnit.SECONDS).sessionId()).isEqualTo(idA);
-        assertThat(futureB.get(5, TimeUnit.SECONDS).sessionId()).isEqualTo(idB);
+        String sessionIdA = futureA.get(5, TimeUnit.SECONDS).sessionId();
+        String sessionIdB = futureB.get(5, TimeUnit.SECONDS).sessionId();
+
+        assertThat(sessionIdA).isNotBlank();
+        assertThat(sessionIdB).isNotBlank();
+        assertThat(sessionIdA).isNotEqualTo(sessionIdB);
 
         sessionA.disconnect();
         sessionB.disconnect();
     }
 
     /**
-     * 시나리오 4 — 핸드셰이크 쿼리파라미터와 CONNECT 프레임 헤더에 서로 다른 sessionId를 동시에 주면,
-     * CONNECT 프레임 헤더가 이긴다. (sessionId 결정 우선순위의 end-to-end 검증)
+     * 시나리오 4 — 핸드셰이크 쿼리파라미터와 CONNECT 프레임 헤더에 동시에 sessionId를 자칭해도
+     * 둘 다 무시된다. 과거에는 CONNECT 프레임 헤더가 우선 적용됐는데, 그 경로 자체가
+     * 핸드셰이크 검증을 우회하는 스푸핑 수단이었기 때문에 지금은 완전히 막혀있어야 한다.
      */
     @Test
-    @DisplayName("CONNECT 헤더 sessionId가 핸드셰이크 쿼리보다 우선한다")
-    void connectHeaderOverridesHandshake() throws Exception {
+    @DisplayName("쿼리파라미터·CONNECT 헤더로 자칭한 sessionId는 둘 다 무시된다")
+    void ignoresClientSuppliedSessionIdFromBothQueryAndConnectHeader() throws Exception {
         String fromQuery = "from-query";
         String fromConnectHeader = "from-connect-header";
         CompletableFuture<PongMessage> pongFuture = new CompletableFuture<>();
@@ -185,7 +194,9 @@ class WebSocketConnectionIntegrationTest {
         session.send("/app/ping", new byte[0]);
 
         PongMessage pong = pongFuture.get(5, TimeUnit.SECONDS);
-        assertThat(pong.sessionId()).isEqualTo(fromConnectHeader);
+        assertThat(pong.sessionId()).isNotEqualTo(fromQuery);
+        assertThat(pong.sessionId()).isNotEqualTo(fromConnectHeader);
+        assertThat(pong.sessionId()).hasSize(36); // 서버가 발급한 UUID
 
         session.disconnect();
     }

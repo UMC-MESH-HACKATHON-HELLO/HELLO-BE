@@ -16,8 +16,8 @@ import org.springframework.messaging.support.MessageBuilder;
 /**
  * {@link AnonymousPrincipalChannelInterceptor} 단위 테스트.
  *
- * <p>CONNECT 시점에 sessionId 결정 우선순위
- * (프레임 헤더 → 핸드셰이크 attributes → UUID 발급)대로 익명 Principal이 세팅되는지 검증한다.</p>
+ * <p>sessionId는 핸드셰이크 attributes(HttpSession 기반으로 확정된 값)만 신뢰하고,
+ * CONNECT 프레임의 sessionId 네이티브 헤더는 스푸핑 가능하므로 무시하는지 검증한다.</p>
  */
 class AnonymousPrincipalChannelInterceptorTest {
 
@@ -25,26 +25,27 @@ class AnonymousPrincipalChannelInterceptorTest {
         new AnonymousPrincipalChannelInterceptor();
 
     /**
-     * 프레임 헤더와 핸드셰이크 값이 둘 다 있으면 프레임 헤더가 이긴다.
+     * CONNECT 프레임의 sessionId 네이티브 헤더는 클라이언트가 자유롭게 채울 수 있는 값이라
+     * 신뢰하지 않는다 — 핸드셰이크 값이 있으면 프레임 헤더는 무시하고 그 값을 사용한다.
      */
     @Test
-    @DisplayName("CONNECT 프레임 헤더 sessionId가 핸드셰이크 값보다 우선한다")
-    void frameHeaderWinsOverHandshake() {
+    @DisplayName("CONNECT 프레임 헤더는 무시하고 핸드셰이크 sessionId를 사용한다")
+    void ignoresFrameHeaderAndUsesHandshake() {
         StompHeaderAccessor accessor = connect();
-        accessor.setNativeHeader(WebSocketConst.SESSION_ID_KEY, "fromFrame");
+        accessor.setNativeHeader(WebSocketConst.SESSION_ID_ATTRIBUTE, "fromFrame");
         accessor.setSessionAttributes(handshakeAttrs("fromHandshake"));
 
         interceptor.preSend(message(accessor), null);
 
-        assertThat(nameOf(accessor)).isEqualTo("fromFrame");
+        assertThat(nameOf(accessor)).isEqualTo("fromHandshake");
     }
 
     /**
-     * 프레임 헤더가 없으면 핸드셰이크에서 넘어온 값을 사용한다.
+     * 핸드셰이크에서 넘어온 값을 사용한다.
      */
     @Test
-    @DisplayName("프레임 헤더가 없으면 핸드셰이크 sessionId를 사용한다")
-    void fallsBackToHandshake() {
+    @DisplayName("핸드셰이크 attributes의 sessionId를 사용한다")
+    void usesHandshakeSessionId() {
         StompHeaderAccessor accessor = connect();
         accessor.setSessionAttributes(handshakeAttrs("fromHandshake"));
 

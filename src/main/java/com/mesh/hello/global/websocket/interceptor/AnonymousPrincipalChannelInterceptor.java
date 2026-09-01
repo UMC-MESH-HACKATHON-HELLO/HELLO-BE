@@ -17,8 +17,13 @@ import org.springframework.stereotype.Component;
 /**
  * STOMP CONNECT 시점에 익명 Principal을 세팅한다. (연결 계층의 핵심)
  *
- * <p>sessionId 결정 우선순위: CONNECT 프레임 헤더 → 핸드셰이크 attributes → (모두 없으면) UUID 발급.
- * 결정된 sessionId로 {@link AnonymousPrincipal}을 만들어 accessor에 user로 세팅하면,
+ * <p>sessionId는 {@link SessionIdHandshakeInterceptor}가 핸드셰이크 단계에서 서버 측
+ * {@code HttpSession}으로부터 확정해 세션 attributes에 저장해둔 값만 사용한다. CONNECT
+ * 프레임의 {@code sessionId} 네이티브 헤더는 더 이상 신뢰하지 않는다 — STOMP 클라이언트
+ * 라이브러리를 쓰면 이 헤더는 클라이언트가 자유롭게 채울 수 있어서, 핸드셰이크 경로(쿼리파라미터/
+ * HTTP 헤더)를 막아도 이 경로로 동일하게 다른 사람의 sessionId를 자칭할 수 있었다.</p>
+ *
+ * <p>결정된 sessionId로 {@link AnonymousPrincipal}을 만들어 accessor에 user로 세팅하면,
  * 이후 이 세션의 모든 메시지에 해당 Principal이 따라붙고
  * {@code /user/queue/...} 1:1 라우팅이 sessionId 기준으로 동작한다.</p>
  *
@@ -46,13 +51,7 @@ public class AnonymousPrincipalChannelInterceptor implements ChannelInterceptor,
     }
 
     private String resolveSessionId(StompHeaderAccessor accessor) {
-        // 1) CONNECT 프레임 헤더 우선
-        String fromFrame = accessor.getFirstNativeHeader(WebSocketConst.SESSION_ID_KEY);
-        if (fromFrame != null && !fromFrame.isBlank()) {
-            return fromFrame;
-        }
-
-        // 2) 핸드셰이크에서 넘어온 attributes
+        // 핸드셰이크에서 HttpSession 기반으로 확정된 값만 신뢰한다.
         Map<String, Object> attributes = accessor.getSessionAttributes();
         if (attributes != null) {
             Object fromHandshake = attributes.get(WebSocketConst.SESSION_ID_ATTRIBUTE);
@@ -61,7 +60,7 @@ public class AnonymousPrincipalChannelInterceptor implements ChannelInterceptor,
             }
         }
 
-        // 3) 안전장치 (정상 흐름이면 핸드셰이크에서 이미 발급되어 도달하지 않음)
+        // 안전장치 (정상 흐름이면 핸드셰이크에서 이미 발급되어 도달하지 않음)
         String generated = UUID.randomUUID().toString();
         log.warn("CONNECT 시점에 sessionId 부재 - 서버 발급: {}", generated);
         return generated;
