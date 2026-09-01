@@ -133,8 +133,8 @@ public class TranscribeService {
         boolean isFinal = result.isFinal();
         if (text == null || text.isBlank()) return;
 
-        String speakerRole = roomRoles.getOrDefault(roomId, new ConcurrentHashMap<>())
-                .getOrDefault(sessionId, "unknown");
+        ConcurrentHashMap<String, String> roles = roomRoles.get(roomId);
+        String speakerRole = roles != null ? roles.getOrDefault(sessionId, "unknown") : "unknown";
 
         if (isFinal) {
             Queue<String> transcript = transcripts.get(roomId);
