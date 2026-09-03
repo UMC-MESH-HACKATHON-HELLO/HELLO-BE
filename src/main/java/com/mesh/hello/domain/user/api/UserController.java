@@ -94,31 +94,11 @@ public class UserController {
             HttpServletRequest request,
             HttpServletResponse response
     ) {
-        // 세션 invalidate 전에 sessionId 먼저 확보 (순서 중요)
-        HttpSession session = request.getSession(false);
-        String sessionId = (session != null) ? session.getId() : null;
-
         // 탈퇴 처리 (UserService - username 기반)
         userService.withdrawByUsername(principal.getName());
 
-        // SessionAccountRepository 바인딩 제거
-        if (sessionId != null) {
-            sessionAccountRepository.unbind(sessionId);
-        }
-
-        // 세션 무효화
-        if (session != null) {
-            session.invalidate();
-        }
-
-        // SecurityContext 초기화
-        SecurityContextHolder.clearContext();
-
-        // JSESSIONID 쿠키 만료 (maxAge=0, path=/)
-        Cookie expiredCookie = new Cookie("JSESSIONID", "");
-        expiredCookie.setMaxAge(0);
-        expiredCookie.setPath("/");
-        response.addCookie(expiredCookie);
+        // 세션 정리는 반드시 트랜잭션 커밋 이후에 한다 (invalidateSessionAndClearCookie 참고)
+        invalidateSessionAndClearCookie(request, response);
 
         return ApiResponse.ok("회원 탈퇴가 완료되었습니다.", null);
     }
@@ -150,35 +130,39 @@ public class UserController {
             HttpServletRequest httpRequest,
             HttpServletResponse httpResponse
     ) {
-        // 세션 정리 전에 sessionId 먼저 확보 (순서 중요)
-        HttpSession session = httpRequest.getSession(false);
-        String sessionId = (session != null) ? session.getId() : null;
-
         // 비밀번호 변경 (UserService - username 기반). @Transactional이라 이 호출이 반환되면 커밋된 상태다.
         userService.changePasswordByUsername(principal.getName(), request);
 
-        // ── 이하 세션 정리는 반드시 커밋 이후에 한다. 서비스(트랜잭션) 안에서 세션을 끊으면
-        //    "세션은 끊겼는데 비밀번호 변경은 롤백된" 불일치 상태가 생길 수 있다. ──
+        // 세션 정리는 반드시 트랜잭션 커밋 이후에 한다 (invalidateSessionAndClearCookie 참고)
+        invalidateSessionAndClearCookie(httpRequest, httpResponse);
 
-        // SessionAccountRepository 바인딩 제거
-        if (sessionId != null) {
-            sessionAccountRepository.unbind(sessionId);
-        }
+        return ApiResponse.ok("비밀번호를 변경했습니다.", null);
+    }
 
-        // 세션 무효화
+    /**
+     * 세션을 무효화하고 SecurityContext를 초기화한 뒤 JSESSIONID 쿠키를 만료시킨다.
+     *
+     * <p><b>반드시 트랜잭션 커밋 이후에 호출해야 한다.</b> 서비스(트랜잭션) 안에서, 혹은 커밋 전에
+     * 먼저 호출하면 "세션은 끊겼는데 DB는 롤백된" 불일치 상태가 생길 수 있다.</p>
+     *
+     * <p>쿠키 속성을 바꿀 일이 생기면 이 메서드 한 곳만 고치면 된다.</p>
+     *
+     * @param request  현재 HTTP 요청 (세션 조회에 사용)
+     * @param response 현재 HTTP 응답 (JSESSIONID 만료 쿠키 작성에 사용)
+     */
+    private void invalidateSessionAndClearCookie(HttpServletRequest request, HttpServletResponse response) {
+        HttpSession session = request.getSession(false);
         if (session != null) {
+            sessionAccountRepository.unbind(session.getId());
             session.invalidate();
         }
 
-        // SecurityContext 초기화
         SecurityContextHolder.clearContext();
 
         // JSESSIONID 쿠키 만료 (maxAge=0, path=/)
         Cookie expiredCookie = new Cookie("JSESSIONID", "");
         expiredCookie.setMaxAge(0);
         expiredCookie.setPath("/");
-        httpResponse.addCookie(expiredCookie);
-
-        return ApiResponse.ok("비밀번호를 변경했습니다.", null);
+        response.addCookie(expiredCookie);
     }
 }
