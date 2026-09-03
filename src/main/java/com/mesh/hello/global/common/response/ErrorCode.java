@@ -29,6 +29,17 @@ public enum ErrorCode {
     UNAUTHORIZED(401, "인증이 필요합니다."),
     DUPLICATE_USERNAME(409, "이미 사용 중인 사용자명입니다."),
     INVALID_USERNAME_FORMAT(400, "사용자명은 영문/숫자/언더스코어 3~20자여야 합니다."),
+
+    // 비밀번호 변경
+    // ⚠️ 삽입 위치 주의: GlobalExceptionHandler.handleValidation은 여러 필드가 동시에 검증
+    //    실패했을 때 ErrorCode.ordinal()이 가장 작은 상수를 대표로 골라 응답한다.
+    //    PASSWORD_MISMATCH가 INVALID_PASSWORD_FORMAT보다 앞에 있어야 "현재 비밀번호" 오류가
+    //    "새 비밀번호 형식" 오류보다 우선 노출된다.
+    //    ErrorCode는 @Enumerated 등으로 어디에도 영속화되지 않으므로 상수 중간 삽입은 안전하다.
+    PASSWORD_MISMATCH(400, "현재 비밀번호가 일치하지 않습니다."),
+    SAME_AS_CURRENT_PASSWORD(400, "새 비밀번호가 현재 비밀번호와 동일합니다."),
+    SOCIAL_ACCOUNT_PASSWORD_CHANGE_NOT_ALLOWED(400, "소셜 로그인 계정은 비밀번호를 변경할 수 없습니다."),
+
     INVALID_PASSWORD_FORMAT(400, "비밀번호는 영문·숫자를 포함한 8~20자여야 합니다."),
     INVALID_EMAIL_FORMAT(400, "이메일 형식이 올바르지 않습니다."),
     INVALID_NICKNAME_FORMAT(400, "닉네임은 2~20자여야 합니다."),
