@@ -7,13 +7,18 @@ import com.mesh.hello.domain.matching.domain.MatchingRoom;
 import com.mesh.hello.domain.matching.repository.MatchingQueueRepository;
 import com.mesh.hello.domain.matching.repository.MatchingRoomRepository;
 import com.mesh.hello.domain.reward.application.PointService;
+import com.mesh.hello.domain.stt.application.ForbiddenWordDetectedEvent;
 import com.mesh.hello.domain.stt.application.TranscribeService;
+import com.mesh.hello.domain.stt.domain.ForbiddenWordDetection;
+import com.mesh.hello.domain.stt.repository.ForbiddenWordDetectionRepository;
 import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ApiResponse;
 import com.mesh.hello.global.common.response.ErrorCode;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.event.EventListener;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import java.time.Duration;
@@ -37,6 +42,7 @@ public class MatchingService {
     private final GeminiSummarizationService geminiSummarizationService;
     private final SessionAccountRepository sessionAccountRepository;
     private final PointService pointService;
+    private final ForbiddenWordDetectionRepository forbiddenWordDetectionRepository;
     private final PriorityMatchingService priorityMatchingService;
 
     /**
@@ -211,7 +217,8 @@ public class MatchingService {
      * roomId만 알면(또는 추측하면) 참가자가 아닌 클라이언트가 남의 통화를 강제 종료할 수 있는
      * 문제를 막기 위함이다.</p>
      *
-     * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있으므로, {@link MatchingRoom#markClosing()}의
+     * <p>helper/helpee 양쪽이 거의 동시에 종료를 요청할 수 있고, 금지어 감지로 인한 강제 종료
+     * ({@link #onForbiddenWordDetected})와도 경합할 수 있으므로 {@link MatchingRoom#markClosing()}의
      * 원자적 CAS 결과로 "최초 종료 요청"을 가려낸다. 종료 처리(녹취 flush·요약·포인트 적립·ENDED 발행)는
      * markClosing()에 성공한 호출 하나만 수행한다 — 진 쪽은 이미 이긴 쪽이 같은 topic으로 ENDED를
      * 보내므로 별도 처리가 필요 없고, 무거운 녹취 요약이 중복 실행되는 것도 막는다. 방이 애초에
@@ -241,6 +248,53 @@ public class MatchingService {
                     (Object) ApiResponse.ok("통화가 종료되었습니다.", Map.of("type", "ENDED"))
             );
         });
+    }
+
+    /**
+     * STT 파이프라인(TranscribeService)에서 금지어가 감지되면 통화를 강제 종료한다.
+     * {@code stt} 도메인이 {@code matching}을 직접 참조하지 않도록 이벤트로 디커플링돼 있다.
+     *
+     * <p>정상 종료({@link #endCall})와 달리 Gemini 요약은 생성하지 않고(금지어가 섞인 대화를
+     * 요약에 노출하지 않기 위함), 포인트도 적립하지 않는다. 양측에는 ENDED가 아닌 FORCE_ENDED를
+     * 전송해 강제 종료임을 구분한다.</p>
+     *
+     * <p>Spring의 이벤트 발행은 기본적으로 동기이므로, 이 리스너는 이벤트를 발행한
+     * {@code TranscribeService}의 OkHttp WebSocket 리더 스레드에서 그대로 실행된다.
+     * {@link #transcribeService}.flushTranscript()가 바로 그 세션 자신의 onClosed 콜백을
+     * 최대 3초간 기다리는데, 그 콜백을 처리해야 할 리더 스레드가 이미 여기 묶여 있으면
+     * 매번 타임아웃까지 지연돼 "실시간 강제 종료"가 무색해진다. {@code @Async}로 별도 스레드에서
+     * 실행해 리더 스레드를 즉시 풀어준다({@link GeminiSummarizationService#summarizeAndNotify}와
+     * 동일한 패턴, {@code @EnableAsync}는 {@code HelloApplication}에 설정돼 있음).</p>
+     */
+    @Async
+    @EventListener
+    public void onForbiddenWordDetected(ForbiddenWordDetectedEvent event) {
+        MatchingRoom room = matchingRoomRepository.findByRoomId(event.roomId()).orElse(null);
+        if (room == null || !room.markClosing()) {
+            return;
+        }
+
+        saveDetectionSafely(event);
+        transcribeService.flushTranscript(event.roomId());
+
+        if (matchingRoomRepository.deleteByRoomId(event.roomId()).isEmpty()) {
+            return;
+        }
+
+        messagingTemplate.convertAndSend(
+                "/api/v1/topic/room/" + event.roomId(),
+                (Object) ApiResponse.ok("부적절한 발화가 감지되어 통화가 강제 종료되었습니다.",
+                        Map.of("type", "FORCE_ENDED", "reason", "FORBIDDEN_WORD"))
+        );
+    }
+
+    private void saveDetectionSafely(ForbiddenWordDetectedEvent event) {
+        try {
+            forbiddenWordDetectionRepository.save(new ForbiddenWordDetection(
+                    event.roomId(), event.sessionId(), event.role(), event.matchedWord(), event.utterance()));
+        } catch (Exception e) {
+            log.warn("금지어 감지 이력 저장 실패: roomId={}", event.roomId(), e);
+        }
     }
 
     /**
@@ -276,12 +330,18 @@ public class MatchingService {
     /**
      * 세션 연결이 끊겼을 때 정리 작업을 수행한다.
      * 대기열에서 제거하고, 통화 중이었다면 상대방에게 PARTNER_DISCONNECTED를 전송한다.
+     *
+     * <p>{@link #endCall}과 마찬가지로 {@link MatchingRoom#markClosing()}으로 다른 종료 경로
+     * (정상 종료, 금지어 강제 종료)와의 경합을 가른다. 이미 선점됐다면 그쪽이 정리를 책임지므로
+     * 여기서는 아무 것도 하지 않는다.</p>
      */
     public void handleDisconnect(String sessionId) {
         priorityMatchingService.removeWaitingParticipant(sessionId);
 
         matchingRoomRepository.findBySessionId(sessionId).ifPresent(room -> {
-            room.markClosing();
+            if (!room.markClosing()) {
+                return;
+            }
             String transcript = transcribeService.flushTranscript(room.getRoomId());
             int durationSec = (int) Duration.between(room.getMatchedAt(), LocalDateTime.now()).getSeconds();
             geminiSummarizationService.markPending(
