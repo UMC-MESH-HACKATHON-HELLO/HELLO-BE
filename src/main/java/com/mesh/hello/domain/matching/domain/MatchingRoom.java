@@ -3,7 +3,9 @@ package com.mesh.hello.domain.matching.domain;
 import lombok.Getter;
 
 import java.time.LocalDateTime;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -23,11 +25,33 @@ public class MatchingRoom {
     // 통화 종료(플러시) 절차가 시작됐는지 여부. true가 된 이후로는 새 STT 세션 시작을 거부한다.
     private final AtomicBoolean closing = new AtomicBoolean(false);
 
+    /** 어르신(helpee)이 publish 중인 카메라/화면공유 트랙 상태. 값이 없으면 OFF로 간주한다. */
+    private final Map<MediaType, MediaState> mediaStates = new ConcurrentHashMap<>();
+
     public MatchingRoom(String roomId, String helpeeSessionId, String helperSessionId) {
         this.roomId = roomId;
         this.helpeeSessionId = helpeeSessionId;
         this.helperSessionId = helperSessionId;
         this.matchedAt = LocalDateTime.now();
+    }
+
+    /** VC101(카메라로 보여주기)/SC101(내 화면 보여주기)가 다루는 부가 영상 트랙 종류. */
+    public enum MediaType {
+        CAMERA, SCREEN_SHARE
+    }
+
+    /** 부가 영상 트랙의 상태. PERMISSION_DENIED는 권한 거부로 음성 통화만 유지 중임을 뜻한다. */
+    public enum MediaState {
+        OFF, ON, PERMISSION_DENIED
+    }
+
+    /** 주어진 트랙 종류의 현재 상태. 한 번도 갱신된 적 없으면 OFF. */
+    public MediaState getMediaState(MediaType type) {
+        return mediaStates.getOrDefault(type, MediaState.OFF);
+    }
+
+    public void setMediaState(MediaType type, MediaState state) {
+        mediaStates.put(type, state);
     }
 
     /** 종료 절차 시작을 표시한다. 이미 표시돼 있었다면 false. */

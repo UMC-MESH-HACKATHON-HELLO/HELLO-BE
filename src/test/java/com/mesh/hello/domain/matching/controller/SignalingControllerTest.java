@@ -9,6 +9,8 @@ import static org.mockito.Mockito.verify;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.mesh.hello.domain.matching.application.MatchingService;
+import com.mesh.hello.domain.matching.domain.MatchingRoom;
+import com.mesh.hello.domain.matching.dto.MediaStateMessage;
 import com.mesh.hello.domain.matching.dto.SignalMessage;
 import com.mesh.hello.global.common.exception.BusinessException;
 import com.mesh.hello.global.common.response.ErrorCode;
@@ -67,5 +69,18 @@ class SignalingControllerTest {
                 .isEqualTo(ErrorCode.FORBIDDEN_SESSION);
 
         verify(messagingTemplate, never()).convertAndSend(any(String.class), any(Object.class));
+    }
+
+    @Test
+    @DisplayName("카메라/화면공유 상태 변경은 MatchingService.updateMediaState로 위임된다")
+    void delegatesMediaStateToMatchingService() {
+        controller = new SignalingController(matchingService, messagingTemplate);
+        Principal principal = () -> "helpee-1";
+        MediaStateMessage msg = new MediaStateMessage(MatchingRoom.MediaType.CAMERA, MatchingRoom.MediaState.ON);
+
+        controller.mediaState(principal, "room-1", msg);
+
+        verify(matchingService).updateMediaState(
+                "helpee-1", "room-1", MatchingRoom.MediaType.CAMERA, MatchingRoom.MediaState.ON);
     }
 }

@@ -446,6 +446,56 @@ class MatchingServiceTest {
     }
 
     // ─────────────────────────────────────────────────────────
+    // updateMediaState (VC101/SC101 카메라·화면공유 상태 시그널링)
+    // ─────────────────────────────────────────────────────────
+    @Nested
+    @DisplayName("updateMediaState - 카메라/화면공유 상태 변경")
+    class UpdateMediaStateTest {
+
+        @Test
+        @DisplayName("helpee가 상태를 변경하면 방에 반영되고 상대에게 MEDIA_STATE가 브로드캐스트된다")
+        void helpeeUpdatesStateAndBroadcasts() throws Exception {
+            stubImmediateMatchWithHelper1();
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+            clearInvocations(messagingTemplate);
+
+            matchingService.updateMediaState(
+                    "helpee-1", roomId, MatchingRoom.MediaType.CAMERA, MatchingRoom.MediaState.ON);
+
+            MatchingRoom room = matchingRoomRepository.findByRoomId(roomId).orElseThrow();
+            assertThat(room.getMediaState(MatchingRoom.MediaType.CAMERA)).isEqualTo(MatchingRoom.MediaState.ON);
+            verify(messagingTemplate).convertAndSend(eq("/api/v1/topic/room/" + roomId), any(Object.class));
+        }
+
+        @Test
+        @DisplayName("도우미가 상태 변경을 시도하면 FORBIDDEN_SESSION 예외가 발생한다")
+        void helperCannotUpdateState() throws Exception {
+            stubImmediateMatchWithHelper1();
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
+            matchingService.requestMatch("helpee-1");
+            String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
+
+            assertThatThrownBy(() -> matchingService.updateMediaState(
+                    "helper-1", roomId, MatchingRoom.MediaType.CAMERA, MatchingRoom.MediaState.ON))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.FORBIDDEN_SESSION);
+        }
+
+        @Test
+        @DisplayName("존재하지 않는 roomId면 NOT_FOUND 예외가 발생한다")
+        void throwsForNonExistentRoom() {
+            assertThatThrownBy(() -> matchingService.updateMediaState(
+                    "helpee-1", "no-such-room", MatchingRoom.MediaType.SCREEN_SHARE, MatchingRoom.MediaState.PERMISSION_DENIED))
+                    .isInstanceOf(BusinessException.class)
+                    .extracting(e -> ((BusinessException) e).getErrorCode())
+                    .isEqualTo(ErrorCode.NOT_FOUND);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────
     // onForbiddenWordDetected
     // ─────────────────────────────────────────────────────────
     @Nested
