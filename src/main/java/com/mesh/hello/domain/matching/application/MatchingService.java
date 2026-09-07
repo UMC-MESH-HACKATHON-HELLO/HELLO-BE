@@ -84,8 +84,8 @@ public class MatchingService {
         String roomId = UUID.randomUUID().toString();
 
         try {
-            String helpeeToken = liveKitService.createToken(roomId, helpeeSessionId);
-            String helperToken = liveKitService.createToken(roomId, helperSessionId);
+            String helpeeToken = liveKitService.createToken(roomId, helpeeSessionId, LiveKitService.Role.HELPEE);
+            String helperToken = liveKitService.createToken(roomId, helperSessionId, LiveKitService.Role.HELPER);
 
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
@@ -148,8 +148,8 @@ public class MatchingService {
         String roomId = UUID.randomUUID().toString();
 
         try {
-            String helpeeToken = liveKitService.createToken(roomId, helpeeSessionId);
-            String helperToken = liveKitService.createToken(roomId, helperSessionId);
+            String helpeeToken = liveKitService.createToken(roomId, helpeeSessionId, LiveKitService.Role.HELPEE);
+            String helperToken = liveKitService.createToken(roomId, helperSessionId, LiveKitService.Role.HELPER);
 
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
@@ -311,6 +311,28 @@ public class MatchingService {
                 log.warn("통화 완료 포인트 적립 실패: helperId={}, roomId={}", helperId, roomId, e);
             }
         });
+    }
+
+    /**
+     * 어르신(helpee)의 카메라/화면공유(VC101/SC101) 상태 변경을 방에 반영하고 상대(도우미)에게 알린다.
+     *
+     * <p>LiveKit 토큰 grant상 이 트랙들을 publish할 수 있는 건 helpee뿐이므로, helper가 보낸
+     * 요청은 상태를 왜곡시킬 수 있어 거부한다.</p>
+     */
+    public void updateMediaState(String sessionId, String roomId, MatchingRoom.MediaType type, MatchingRoom.MediaState state) {
+        MatchingRoom room = matchingRoomRepository.findByRoomId(roomId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.NOT_FOUND));
+        if (!sessionId.equals(room.getHelpeeSessionId())) {
+            throw new BusinessException(ErrorCode.FORBIDDEN_SESSION);
+        }
+
+        room.setMediaState(type, state);
+
+        messagingTemplate.convertAndSend(
+                "/api/v1/topic/room/" + roomId,
+                ApiResponse.ok("미디어 상태가 변경되었습니다.",
+                        Map.of("type", "MEDIA_STATE", "mediaType", type, "state", state))
+        );
     }
 
     /**

@@ -3,6 +3,7 @@ package com.mesh.hello.domain.matching.controller;
 import com.mesh.hello.domain.calling.domain.CallSummary;
 import com.mesh.hello.domain.matching.application.MatchingService;
 import com.mesh.hello.domain.matching.dto.HelpRequest;
+import com.mesh.hello.domain.matching.dto.MediaStateMessage;
 import com.mesh.hello.domain.matching.dto.SignalMessage;
 import com.mesh.hello.global.common.response.ApiResponse;
 import jakarta.validation.Valid;
@@ -52,5 +53,15 @@ public class SignalingController {
     public void signal(Principal principal, @DestinationVariable String roomId, SignalMessage msg) {
         matchingService.assertParticipant(principal.getName(), roomId);
         messagingTemplate.convertAndSend("/api/v1/topic/room/" + roomId, ApiResponse.ok("시그널을 중계합니다.", msg));
+    }
+
+    // 어르신의 카메라/화면공유(VC101/SC101) 상태 변경(OFF/ON/PERMISSION_DENIED)을 도우미에게 알림
+    @MessageMapping("/media/state/{roomId}")
+    public void mediaState(
+            Principal principal,
+            @DestinationVariable String roomId,
+            @Payload @Valid MediaStateMessage msg
+    ) {
+        matchingService.updateMediaState(principal.getName(), roomId, msg.mediaType(), msg.state());
     }
 }
