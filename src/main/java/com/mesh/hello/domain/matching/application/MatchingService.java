@@ -84,8 +84,8 @@ public class MatchingService {
         String roomId = UUID.randomUUID().toString();
 
         try {
-            String helpeeToken = liveKitService.createToken(roomId, helpeeSessionId);
-            String helperToken = liveKitService.createToken(roomId, helperSessionId);
+            String helpeeToken = liveKitService.createToken(roomId, helpeeSessionId, LiveKitService.Role.HELPEE);
+            String helperToken = liveKitService.createToken(roomId, helperSessionId, LiveKitService.Role.HELPER);
 
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);
@@ -148,8 +148,8 @@ public class MatchingService {
         String roomId = UUID.randomUUID().toString();
 
         try {
-            String helpeeToken = liveKitService.createToken(roomId, helpeeSessionId);
-            String helperToken = liveKitService.createToken(roomId, helperSessionId);
+            String helpeeToken = liveKitService.createToken(roomId, helpeeSessionId, LiveKitService.Role.HELPEE);
+            String helperToken = liveKitService.createToken(roomId, helperSessionId, LiveKitService.Role.HELPER);
 
             MatchingRoom room = new MatchingRoom(roomId, helpeeSessionId, helperSessionId);
             matchingRoomRepository.save(room);

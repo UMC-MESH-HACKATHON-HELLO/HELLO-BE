@@ -88,8 +88,8 @@ class MatchingServiceTest {
     void requestMatch_matchesSelectedHelper() throws Exception {
         given(priorityMatchingService.matchHelper(anyString(), eq(CallSummary.CallCategory.SMARTPHONE)))
                 .willReturn(Optional.of("helper-1"));
-        given(liveKitService.createToken(anyString(), eq("helpee-1"))).willReturn("helpee-token");
-        given(liveKitService.createToken(anyString(), eq("helper-1"))).willReturn("helper-token");
+        given(liveKitService.createToken(anyString(), eq("helpee-1"), eq(LiveKitService.Role.HELPEE))).willReturn("helpee-token");
+        given(liveKitService.createToken(anyString(), eq("helper-1"), eq(LiveKitService.Role.HELPER))).willReturn("helper-token");
 
         matchingService.requestMatch("helpee-1", CallSummary.CallCategory.SMARTPHONE);
 
@@ -102,7 +102,7 @@ class MatchingServiceTest {
     void requestMatch_restoresHelperWhenTokenCreationFails() throws Exception {
         given(priorityMatchingService.matchHelper(anyString(), eq(CallSummary.CallCategory.ROAD_GUIDE)))
                 .willReturn(Optional.of("helper-1"));
-        given(liveKitService.createToken(anyString(), anyString()))
+        given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class)))
                 .willThrow(new RuntimeException("LiveKit error"));
 
         matchingService.requestMatch("helpee-1", CallSummary.CallCategory.ROAD_GUIDE);
@@ -128,7 +128,7 @@ class MatchingServiceTest {
                 "helpee-1", CallSummary.CallCategory.KIOSK
         );
         given(priorityMatchingService.registerHelper("helper-1")).willReturn(Optional.of(helpee));
-        given(liveKitService.createToken(anyString(), anyString()))
+        given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class)))
                 .willThrow(new RuntimeException("LiveKit error"));
 
         matchingService.registerHelper("helper-1");
@@ -186,7 +186,7 @@ class MatchingServiceTest {
         @DisplayName("이미 매칭되어 통화 중인 도우미가 취소하면 ALREADY_IN_CALL 예외가 발생하고 방은 유지된다")
         void alreadyInCallThrows() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
 
             assertThatThrownBy(() -> matchingService.stopHelperWaiting("helper-1"))
@@ -202,7 +202,7 @@ class MatchingServiceTest {
         void concurrentStopAndMatchAreMutuallyExclusive() throws Exception {
             // 취소 스레드가 락을 계속 선점해 50번 트라이얼 내내 매칭이 한 번도 안 일어날 수도 있는
             // 정상적인 레이스 결과이므로, 스텁 미사용을 오류로 취급하지 않도록 lenient 처리한다.
-            lenient().when(liveKitService.createToken(anyString(), anyString())).thenReturn("token");
+            lenient().when(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).thenReturn("token");
 
             // priorityMatchingService는 모킹 대상이라 실제 큐 상태가 없으므로,
             // 트라이얼마다 대기 중인 helper 하나를 담아두는 최소한의 가짜 큐로 대체한다.
@@ -268,7 +268,7 @@ class MatchingServiceTest {
             CountDownLatch tokenCallStarted = new CountDownLatch(1);
             CountDownLatch proceedWithToken = new CountDownLatch(1);
 
-            given(liveKitService.createToken(anyString(), anyString())).willAnswer(invocation -> {
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willAnswer(invocation -> {
                 tokenCallStarted.countDown();
                 proceedWithToken.await();
                 return "token";
@@ -307,7 +307,7 @@ class MatchingServiceTest {
         @DisplayName("통화 종료 → /topic/room/{roomId} 에 ENDED 브로드캐스트 + 방 삭제")
         void endCallBroadcastsAndDeletesRoom() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
 
             Optional<MatchingRoom> roomOpt = matchingRoomRepository.findBySessionId("helpee-1");
@@ -329,7 +329,7 @@ class MatchingServiceTest {
         @DisplayName("로그인된 도우미가 통화 종료 → 포인트 적립")
         void endCallAwardsPointsToLoggedInHelper() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             given(sessionAccountRepository.findUserId("helper-1")).willReturn(Optional.of(42L));
             matchingService.requestMatch("helpee-1");
 
@@ -344,7 +344,7 @@ class MatchingServiceTest {
         @DisplayName("로그인하지 않은 도우미가 통화 종료 → 포인트 미적립")
         void endCallSkipsPointsForAnonymousHelper() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
 
             String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
@@ -358,7 +358,7 @@ class MatchingServiceTest {
         @DisplayName("참가자가 아닌 sessionId로 종료를 시도하면 FORBIDDEN_SESSION 예외가 발생하고 방은 유지된다")
         void endCallByNonParticipantIsForbidden() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
 
             Optional<MatchingRoom> roomOpt = matchingRoomRepository.findBySessionId("helpee-1");
@@ -387,7 +387,7 @@ class MatchingServiceTest {
         @DisplayName("이미 다른 경로(예: handleDisconnect)가 종료를 선점한 방이면 종료 처리를 건너뛴다")
         void endCallSkipsWhenAlreadyMarkedClosing() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
 
             MatchingRoom room = matchingRoomRepository.findBySessionId("helpee-1").orElseThrow();
@@ -413,7 +413,7 @@ class MatchingServiceTest {
         @DisplayName("참가자면 예외 없이 통과한다")
         void passesForParticipant() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
             String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
 
@@ -425,7 +425,7 @@ class MatchingServiceTest {
         @DisplayName("참가자가 아니면 FORBIDDEN_SESSION 예외가 발생한다")
         void throwsForNonParticipant() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
             String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
 
@@ -456,7 +456,7 @@ class MatchingServiceTest {
         @DisplayName("금지어 감지 → 감지 이력 저장 + FORCE_ENDED 브로드캐스트 + 방 삭제, 요약/포인트는 없음")
         void forceEndsCallOnDetection() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
 
             String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
@@ -479,7 +479,7 @@ class MatchingServiceTest {
         @DisplayName("이미 종료 처리 중인 방이면 중복 처리하지 않는다")
         void ignoresAlreadyClosingRoom() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), anyString())).willReturn("token");
+            given(liveKitService.createToken(anyString(), anyString(), any(LiveKitService.Role.class))).willReturn("token");
             matchingService.requestMatch("helpee-1");
 
             String roomId = matchingRoomRepository.findBySessionId("helpee-1").get().getRoomId();
@@ -524,8 +524,8 @@ class MatchingServiceTest {
         @DisplayName("통화 중 helper 연결 종료 → helpee에게 PARTNER_DISCONNECTED + 방 삭제")
         void disconnectHelperInRoom() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), eq("helpee-1"))).willReturn("t1");
-            given(liveKitService.createToken(anyString(), eq("helper-1"))).willReturn("t2");
+            given(liveKitService.createToken(anyString(), eq("helpee-1"), eq(LiveKitService.Role.HELPEE))).willReturn("t1");
+            given(liveKitService.createToken(anyString(), eq("helper-1"), eq(LiveKitService.Role.HELPER))).willReturn("t2");
             matchingService.requestMatch("helpee-1");
 
             // MATCHED 메시지 리셋 후 disconnect 검증
@@ -546,8 +546,8 @@ class MatchingServiceTest {
         @DisplayName("통화 중 helpee 연결 종료 → helper에게 PARTNER_DISCONNECTED + 방 삭제")
         void disconnectHelpeeInRoom() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), eq("helpee-1"))).willReturn("t1");
-            given(liveKitService.createToken(anyString(), eq("helper-1"))).willReturn("t2");
+            given(liveKitService.createToken(anyString(), eq("helpee-1"), eq(LiveKitService.Role.HELPEE))).willReturn("t1");
+            given(liveKitService.createToken(anyString(), eq("helper-1"), eq(LiveKitService.Role.HELPER))).willReturn("t2");
             matchingService.requestMatch("helpee-1");
 
             clearInvocations(messagingTemplate);
@@ -566,8 +566,8 @@ class MatchingServiceTest {
         @DisplayName("다른 종료 경로(예: 금지어 강제 종료)가 이미 방을 선점했다면 handleDisconnect는 아무 것도 하지 않는다")
         void skipsWhenRoomAlreadyClosedByAnotherPath() throws Exception {
             stubImmediateMatchWithHelper1();
-            given(liveKitService.createToken(anyString(), eq("helpee-1"))).willReturn("t1");
-            given(liveKitService.createToken(anyString(), eq("helper-1"))).willReturn("t2");
+            given(liveKitService.createToken(anyString(), eq("helpee-1"), eq(LiveKitService.Role.HELPEE))).willReturn("t1");
+            given(liveKitService.createToken(anyString(), eq("helper-1"), eq(LiveKitService.Role.HELPER))).willReturn("t2");
             matchingService.requestMatch("helpee-1");
 
             String roomId = matchingRoomRepository.findBySessionId("helper-1").get().getRoomId();
